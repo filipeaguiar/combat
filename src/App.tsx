@@ -219,19 +219,9 @@ function CombatantCard({
     }
   };
 
-  const hpColor = hpPct > 50 ? '#48bb78' : hpPct > 25 ? '#ecc94b' : '#e53e3e';
-
   return (
     <div className={`combatant-card${isDead ? ' dead' : ''}`}>
       <div className="card-main">
-        {/* Vertical HP bar */}
-        <div className="hp-bar-vertical">
-          <div
-            className="hp-bar-fill"
-            style={{ height: `${hpPct}%`, background: hpColor }}
-          />
-        </div>
-
         <div className="card-content">
           {/* Top row: name + actions */}
           <div className="card-top-row">
