@@ -25,10 +25,17 @@ export default function App() {
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [screen, setScreen] = useState<'setup' | 'combat'>('setup');
   const [error, setError] = useState('');
+  const [interactionCount, setInteractionCount] = useState(0);
+  const [showNarrative, setShowNarrative] = useState(false);
 
   useEffect(() => {
     Promise.all([loadMonsters(), fetchSpells()]).then(() => setLoading(false));
   }, []);
+
+  const handleInteraction = () => {
+    setInteractionCount(prev => prev + 1);
+    setShowNarrative(true);
+  };
 
   const startCombat = () => {
     setError('');
@@ -68,6 +75,8 @@ export default function App() {
     }
     setCombatants(newCombatants);
     setScreen('combat');
+    setInteractionCount(1);
+    setShowNarrative(true);
   };
 
   /* ---- Loading ---- */
@@ -118,6 +127,14 @@ export default function App() {
           combatants={combatants}
           setCombatants={setCombatants}
           onBack={() => setScreen('setup')}
+          onInteraction={handleInteraction}
+        />
+      )}
+
+      {showNarrative && (
+        <NarrativeModal 
+          count={interactionCount} 
+          onClose={() => setShowNarrative(false)} 
         />
       )}
     </div>
@@ -128,11 +145,12 @@ export default function App() {
    COMBAT SCREEN
    ============================================================ */
 function CombatScreen({
-  combatants, setCombatants, onBack,
+  combatants, setCombatants, onBack, onInteraction,
 }: {
   combatants: Combatant[];
   setCombatants: React.Dispatch<React.SetStateAction<Combatant[]>>;
   onBack: () => void;
+  onInteraction: () => void;
 }) {
   const updateHp = (id: string, delta: number) => {
     setCombatants(prev =>
@@ -142,6 +160,7 @@ function CombatScreen({
           : c,
       ),
     );
+    onInteraction();
   };
 
   const removeCombatant = (id: string) => {
@@ -598,6 +617,40 @@ function SpellModal({ spell, onClose }: { spell: any; onClose: () => void }) {
                 : '')
           }}
         />
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   NARRATIVE MODAL
+   ============================================================ */
+function NarrativeModal({ count, onClose }: { count: number; onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
+      <div className="spell-modal" onClick={e => e.stopPropagation()} style={{ borderColor: 'var(--orange)', boxShadow: '0 8px 32px rgba(237, 137, 54, 0.2)' }}>
+        <div className="spell-modal-header" style={{ borderBottomColor: 'rgba(237, 137, 54, 0.2)' }}>
+          <div>
+            <div className="spell-modal-title" style={{ color: 'var(--orange)' }}>
+              <i className="ra ra-speech-bubble" /> Momento de Narrativa
+            </div>
+            <div className="spell-modal-subtitle">Interação #{count}</div>
+          </div>
+          <button className="spell-modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="spell-modal-body" style={{ textAlign: 'center', padding: '30px 20px' }}>
+          <i className="ra ra-wyvern" style={{ fontSize: '48px', color: 'var(--orange)', opacity: 0.5, marginBottom: '20px', display: 'block' }} />
+          <p style={{ fontSize: '18px', color: 'var(--text-primary)', marginBottom: '10px', fontWeight: 600 }}>
+            O que o monstro faz ou diz?
+          </p>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '30px' }}>
+            Descreva um grito de dor, uma provocação, ou uma mudança de postura do inimigo antes de continuar rolando dados.
+          </p>
+          <button className="btn-start" onClick={onClose} style={{ width: '100%', background: 'var(--orange)' }}>
+            Continuar Combate
+          </button>
+        </div>
       </div>
     </div>
   );
