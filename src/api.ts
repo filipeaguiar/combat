@@ -1,9 +1,11 @@
 const BASE_URL = 'https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data';
 
-// Common books covering most monsters
+// Common books prioritized by most recent core rules (2024/2025)
 const COMMON_BOOKS = [
-  'bestiary/bestiary-mm.json',
+  'bestiary/bestiary-xmm.json',
+  'bestiary/bestiary-xphb.json',
   'bestiary/bestiary-mpmm.json',
+  'bestiary/bestiary-mm.json',
   'bestiary/bestiary-vgm.json',
   'bestiary/bestiary-mtf.json',
   'bestiary/bestiary-phb.json'
@@ -37,6 +39,7 @@ export function findMonster(name: string) {
 }
 
 const SPELL_BOOKS = [
+  'spells/spells-xphb.json',
   'spells/spells-phb.json',
   'spells/spells-xge.json',
   'spells/spells-tce.json'
