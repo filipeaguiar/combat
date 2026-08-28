@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { loadMonsters, findMonster, fetchSpells, findSpell } from './api';
-import { getHp, getAc, renderEntries, getXp } from './utils';
-import { Sword, Plus, Minus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  getHp, getAc, renderEntries, getXp, getCr, getSpeed,
+  getMonsterType, getSizeLabel, getModifier, extractSpellDc,
+  getSchoolName, parseEntry,
+} from './utils';
+import './styles.css';
 
 type Combatant = {
   id: string;
@@ -12,6 +16,9 @@ type Combatant = {
   data: any;
 };
 
+/* ============================================================
+   APP ROOT
+   ============================================================ */
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('1 cult fanatic\n2 ghoul');
@@ -35,10 +42,7 @@ export default function App() {
         const count = parseInt(match[1], 10);
         const name = match[2];
         const monster = findMonster(name);
-        if (!monster) {
-          setError(`Monster not found: ${name}`);
-          return;
-        }
+        if (!monster) { setError(`Monster not found: "${name}"`); return; }
         for (let i = 0; i < count; i++) {
           newCombatants.push({
             id: `${name}-${idCounter++}`,
@@ -46,22 +50,19 @@ export default function App() {
             maxHp: getHp(monster),
             currentHp: getHp(monster),
             ac: getAc(monster),
-            data: monster
+            data: monster,
           });
         }
       } else {
         const monster = findMonster(line.trim());
-        if (!monster) {
-          setError(`Monster not found: ${line}`);
-          return;
-        }
+        if (!monster) { setError(`Monster not found: "${line.trim()}"`); return; }
         newCombatants.push({
           id: `${line}-${idCounter++}`,
           name: monster.name,
           maxHp: getHp(monster),
           currentHp: getHp(monster),
           ac: getAc(monster),
-          data: monster
+          data: monster,
         });
       }
     }
@@ -69,213 +70,542 @@ export default function App() {
     setScreen('combat');
   };
 
+  /* ---- Loading ---- */
   if (loading) {
-    return <div style={{ padding: 20, textAlign: 'center' }}>Loading monsters data...</div>;
+    return (
+      <div className="loading-screen">
+        <i className="ra ra-dragon loading-icon" />
+        <div className="loading-text">Summoning Creatures…</div>
+        <div className="loading-bar"><div className="loading-bar-fill" /></div>
+      </div>
+    );
   }
 
+  /* ---- Screens ---- */
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: 20 }}>
+    <div className="app-container">
       {screen === 'setup' ? (
-        <div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Sword /> D&D Combat Tracker
+        <div className="setup-screen">
+          <h1 className="setup-title">
+            <i className="ra ra-crossed-swords" />
+            Combat Tracker
           </h1>
-          <p>Enter combatants (e.g., "1 cult fanatic" or "2 ghoul"):</p>
-          <textarea
-            style={{ width: '100%', height: 200, padding: 10, background: '#2a2a2a', color: '#fff', border: '1px solid #444', borderRadius: 8, fontSize: 16 }}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-          />
-          {error && <div style={{ color: '#ff6b6b', margin: '10px 0' }}>{error}</div>}
-          <button
-            style={{ marginTop: 20, padding: '12px 24px', background: '#e53e3e', color: 'white', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
-            onClick={startCombat}
-          >
-            <Sword size={20} /> Start Combat
-          </button>
+          <p className="setup-subtitle">Track your D&D 5e encounters with data from 5e.tools</p>
+
+          <div className="setup-card">
+            <label className="setup-label">
+              <i className="ra ra-scroll-unfurled" />
+              Encounter Roster
+            </label>
+            <textarea
+              className="setup-textarea"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={'1 cult fanatic\n2 ghoul\n1 ogre'}
+            />
+            {error && (
+              <div className="setup-error">
+                <i className="ra ra-aware" /> {error}
+              </div>
+            )}
+            <button className="btn-start" onClick={startCombat}>
+              <i className="ra ra-sword" /> Initiate Combat
+            </button>
+          </div>
         </div>
       ) : (
-        <CombatScreen combatants={combatants} setCombatants={setCombatants} onBack={() => setScreen('setup')} />
+        <CombatScreen
+          combatants={combatants}
+          setCombatants={setCombatants}
+          onBack={() => setScreen('setup')}
+        />
       )}
     </div>
   );
 }
 
-function CombatScreen({ combatants, setCombatants, onBack }: { combatants: Combatant[], setCombatants: any, onBack: () => void }) {
+/* ============================================================
+   COMBAT SCREEN
+   ============================================================ */
+function CombatScreen({
+  combatants, setCombatants, onBack,
+}: {
+  combatants: Combatant[];
+  setCombatants: React.Dispatch<React.SetStateAction<Combatant[]>>;
+  onBack: () => void;
+}) {
   const updateHp = (id: string, delta: number) => {
-    setCombatants((prev: Combatant[]) => prev.map(c => 
-      c.id === id ? { ...c, currentHp: Math.min(c.maxHp, Math.max(0, c.currentHp + delta)) } : c
-    ));
+    setCombatants(prev =>
+      prev.map(c =>
+        c.id === id
+          ? { ...c, currentHp: Math.min(c.maxHp, Math.max(0, c.currentHp + delta)) }
+          : c,
+      ),
+    );
   };
 
   const removeCombatant = (id: string) => {
-    setCombatants((prev: Combatant[]) => prev.filter(c => c.id !== id));
+    setCombatants(prev => prev.filter(c => c.id !== id));
   };
 
-  const totalXp = combatants.reduce((acc, c) => acc + getXp(c.data), 0);
+  const totalXp = combatants.reduce((sum, c) => sum + getXp(c.data), 0);
+  const alive = combatants.filter(c => c.currentHp > 0).length;
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+    <>
+      {/* Header */}
+      <div className="combat-header">
         <div>
-          <h2 style={{ margin: 0 }}>Combat Tracker</h2>
-          <div style={{ color: '#ecc94b', fontSize: 14, marginTop: 4 }}>
-            Total XP: <strong>{totalXp.toLocaleString()}</strong>
+          <div className="combat-title">
+            <i className="ra ra-crossed-swords" /> Combat Tracker
+          </div>
+          <div className="combat-stats">
+            <div className="combat-stat">
+              <i className="ra ra-gem" />
+              <span className="value">{totalXp.toLocaleString()}</span> XP
+            </div>
+            <div className="combat-stat">
+              <i className="ra ra-skull" />
+              <span className="value">{alive}</span> / {combatants.length} alive
+            </div>
           </div>
         </div>
-        <button onClick={onBack} style={{ padding: '8px 16px', background: '#4a5568', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
-          Back to Setup
+        <button className="btn-back" onClick={onBack}>
+          <i className="ra ra-arrow-cluster" /> Setup
         </button>
       </div>
-      
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {combatants.map(c => (
-          <CombatantCard key={c.id} combatant={c} onUpdateHp={(delta) => updateHp(c.id, delta)} onRemove={() => removeCombatant(c.id)} />
-        ))}
-        {combatants.length === 0 && <div style={{ textAlign: 'center', color: '#aaa' }}>All combatants defeated!</div>}
-      </div>
-    </div>
+
+      {/* Cards */}
+      {combatants.map(c => (
+        <CombatantCard
+          key={c.id}
+          combatant={c}
+          onUpdateHp={d => updateHp(c.id, d)}
+          onRemove={() => removeCombatant(c.id)}
+        />
+      ))}
+
+      {combatants.length === 0 && (
+        <div className="empty-state">
+          <i className="ra ra-skull-trophy" />
+          <p>All Enemies Vanquished</p>
+        </div>
+      )}
+    </>
   );
 }
 
-function CombatantCard({ combatant, onUpdateHp, onRemove }: { combatant: Combatant, onUpdateHp: (delta: number) => void, onRemove: () => void }) {
+/* ============================================================
+   COMBATANT CARD
+   ============================================================ */
+function CombatantCard({
+  combatant, onUpdateHp, onRemove,
+}: {
+  combatant: Combatant;
+  onUpdateHp: (delta: number) => void;
+  onRemove: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [damageInput, setDamageInput] = useState('');
-  
-  const handleDamage = () => {
+  const d = combatant.data;
+  const isDead = combatant.currentHp <= 0;
+  const hpPct = combatant.maxHp > 0 ? (combatant.currentHp / combatant.maxHp) * 100 : 0;
+
+  const applyDelta = (sign: 1 | -1) => {
     const val = parseInt(damageInput, 10);
-    if (!isNaN(val)) {
-      onUpdateHp(-val);
+    if (!isNaN(val) && val > 0) {
+      onUpdateHp(sign * val);
       setDamageInput('');
     }
   };
 
-  const isDead = combatant.currentHp <= 0;
+  const hpColor = hpPct > 50 ? '#48bb78' : hpPct > 25 ? '#ecc94b' : '#e53e3e';
 
   return (
-    <div style={{ background: '#2d3748', borderRadius: 8, padding: 16, borderLeft: `4px solid ${isDead ? '#e53e3e' : '#48bb78'}`, opacity: isDead ? 0.6 : 1 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, textDecoration: isDead ? 'line-through' : 'none' }}>
-            {combatant.name} 
-            <span style={{ fontSize: 14, fontWeight: 'normal', color: '#a0aec0' }}>AC: {combatant.ac}</span>
-          </h3>
-          <div style={{ fontSize: 20, fontWeight: 'bold', marginTop: 8 }}>
-            HP: <span style={{ color: combatant.currentHp <= combatant.maxHp / 2 ? '#e53e3e' : '#48bb78' }}>{combatant.currentHp}</span> / {combatant.maxHp}
-          </div>
+    <div className={`combatant-card${isDead ? ' dead' : ''}`}>
+      <div className="card-main">
+        {/* Vertical HP bar */}
+        <div className="hp-bar-vertical">
+          <div
+            className="hp-bar-fill"
+            style={{ height: `${hpPct}%`, background: hpColor }}
+          />
         </div>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input 
-              type="number" 
-              placeholder="Dmg/Heal" 
-              value={damageInput} 
-              onChange={e => setDamageInput(e.target.value)}
-              style={{ width: 80, padding: 8, borderRadius: 4, border: 'none', background: '#1a202c', color: 'white' }}
-            />
-            <button onClick={handleDamage} style={{ background: '#e53e3e', color: 'white', border: 'none', padding: 8, borderRadius: 4, cursor: 'pointer' }} title="Damage"><Minus size={16} /></button>
-            <button onClick={() => {
-              const val = parseInt(damageInput, 10);
-              if (!isNaN(val)) {
-                onUpdateHp(val);
-                setDamageInput('');
-              }
-            }} style={{ background: '#48bb78', color: 'white', border: 'none', padding: 8, borderRadius: 4, cursor: 'pointer' }} title="Heal"><Plus size={16} /></button>
+
+        <div className="card-content">
+          {/* Top row: name + actions */}
+          <div className="card-top-row">
+            <div className="monster-identity">
+              <div className="monster-name">
+                <i className={`ra ${isDead ? 'ra-skull' : 'ra-dragon'}`} />
+                {combatant.name}
+              </div>
+              <div className="monster-meta">
+                {getSizeLabel(d.size)} {getMonsterType(d)}{d.alignment ? '' : ''}
+              </div>
+            </div>
+
+            <div className="card-actions">
+              <button
+                className="btn-icon"
+                onClick={() => setExpanded(!expanded)}
+                title={expanded ? 'Collapse' : 'Expand details'}
+              >
+                <i className={`ra ${expanded ? 'ra-cancel' : 'ra-scroll-unfurled'}`} />
+              </button>
+              <button
+                className="btn-icon danger"
+                onClick={onRemove}
+                title="Remove"
+              >
+                <i className="ra ra-burning-embers" />
+              </button>
+            </div>
           </div>
-          
-          <button onClick={() => setExpanded(!expanded)} style={{ background: 'transparent', border: 'none', color: '#cbd5e0', cursor: 'pointer' }}>
-            {expanded ? <ChevronUp /> : <ChevronDown />}
-          </button>
-          
-          <button onClick={onRemove} style={{ background: 'transparent', border: 'none', color: '#fc8181', cursor: 'pointer' }}>
-            <Trash2 />
-          </button>
+
+          {/* Stat badges */}
+          <div className="stats-row">
+            <div className={`stat-badge hp ${hpPct > 50 ? 'healthy' : 'critical'}`}>
+              <i className="ra ra-hearts" />
+              <span className="value">{combatant.currentHp}</span>
+              <span style={{ opacity: 0.5 }}>/ {combatant.maxHp}</span>
+            </div>
+            <div className="stat-badge ac">
+              <i className="ra ra-shield" />
+              <span className="value">{combatant.ac}</span>
+            </div>
+            <div className="stat-badge speed">
+              <i className="ra ra-boot-stomp" />
+              <span className="value">{getSpeed(d)}</span>
+            </div>
+            <div className="stat-badge cr">
+              <i className="ra ra-targeted" />
+              CR <span className="value">{getCr(d)}</span>
+            </div>
+            <div className="stat-badge xp">
+              <i className="ra ra-gem" />
+              <span className="value">{getXp(d).toLocaleString()}</span> XP
+            </div>
+          </div>
+
+          {/* Damage controls */}
+          <div className="damage-controls">
+            <input
+              className="damage-input"
+              type="number"
+              min="0"
+              value={damageInput}
+              onChange={e => setDamageInput(e.target.value)}
+              placeholder="HP"
+              onKeyDown={e => { if (e.key === 'Enter') applyDelta(-1); }}
+            />
+            <button className="btn-damage hit" onClick={() => applyDelta(-1)}>
+              <i className="ra ra-sword" /> Damage
+            </button>
+            <button className="btn-damage heal" onClick={() => applyDelta(1)}>
+              <i className="ra ra-health" /> Heal
+            </button>
+          </div>
         </div>
       </div>
 
-      {expanded && (
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #4a5568', fontSize: 14 }}>
-          {combatant.data.trait && (
-            <div style={{ marginBottom: 12 }}>
-              <h4 style={{ margin: '0 0 8px 0', color: '#ecc94b' }}>Traits</h4>
-              {combatant.data.trait.map((t: any, i: number) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <strong>{t.name}.</strong> {renderEntries(t.entries)}
-                </div>
-              ))}
+      {/* ---- Expanded Details ---- */}
+      {expanded && <CardDetails data={d} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   CARD DETAILS (expanded section)
+   ============================================================ */
+function CardDetails({ data: d }: { data: any }) {
+  const spellInfo = extractSpellDc(d.spellcasting);
+
+  return (
+    <div className="card-details">
+      {/* Ability Scores */}
+      <div className="ability-scores">
+        {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).map(ab => (
+          <div className="ability-score" key={ab}>
+            <div className="label">{ab}</div>
+            <div className="value">{d[ab] ?? '—'}</div>
+            <div className="modifier">{d[ab] != null ? getModifier(d[ab]) : ''}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Immunities & Resistances */}
+      {(d.immune || d.resist || d.conditionImmune || d.vulnerable) && (
+        <div className="detail-section">
+          <div className="detail-section-title traits"><i className="ra ra-aura" /> Defenses</div>
+          {d.immune && (
+            <div className="detail-entry">
+              <strong>Damage Immunities: </strong>
+              {d.immune.map((im: any) => typeof im === 'string' ? im : im.immune?.join(', ')).join(', ')}
             </div>
           )}
-          
-          {combatant.data.action && (
-            <div style={{ marginBottom: 12 }}>
-              <h4 style={{ margin: '0 0 8px 0', color: '#fc8181' }}>Actions</h4>
-              {combatant.data.action.map((a: any, i: number) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <strong>{a.name}.</strong> {renderEntries(a.entries)}
+          {d.resist && (
+            <div className="detail-entry">
+              <strong>Damage Resistances: </strong>
+              {d.resist.map((r: any) => typeof r === 'string' ? r : r.resist?.join(', ')).join(', ')}
+            </div>
+          )}
+          {d.vulnerable && (
+            <div className="detail-entry">
+              <strong>Vulnerabilities: </strong>
+              {d.vulnerable.map((v: any) => typeof v === 'string' ? v : '').join(', ')}
+            </div>
+          )}
+          {d.conditionImmune && (
+            <div className="detail-entry">
+              <strong>Condition Immunities: </strong>{d.conditionImmune.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Senses */}
+      {d.senses && (
+        <div className="detail-section">
+          <div className="detail-section-title traits"><i className="ra ra-eye-monster" /> Senses</div>
+          <div className="detail-entry">{d.senses.join(', ')}{d.passive ? `, passive Perception ${d.passive}` : ''}</div>
+        </div>
+      )}
+
+      {/* Traits */}
+      {d.trait && (
+        <div className="detail-section">
+          <div className="detail-section-title traits"><i className="ra ra-player-dodge" /> Traits</div>
+          {d.trait.map((t: any, i: number) => (
+            <div key={i} className="detail-entry">
+              <strong>{t.name}.</strong> {renderEntries(t.entries)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      {d.action && (
+        <div className="detail-section">
+          <div className="detail-section-title actions"><i className="ra ra-sword" /> Actions</div>
+          {d.action.map((a: any, i: number) => (
+            <div key={i} className="detail-entry">
+              <strong>{a.name}.</strong> {renderEntries(a.entries)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Bonus Actions */}
+      {d.bonus && (
+        <div className="detail-section">
+          <div className="detail-section-title bonus"><i className="ra ra-lightning-bolt" /> Bonus Actions</div>
+          {d.bonus.map((b: any, i: number) => (
+            <div key={i} className="detail-entry">
+              <strong>{b.name}.</strong> {renderEntries(b.entries)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Reactions */}
+      {d.reaction && (
+        <div className="detail-section">
+          <div className="detail-section-title reactions"><i className="ra ra-circular-shield" /> Reactions</div>
+          {d.reaction.map((r: any, i: number) => (
+            <div key={i} className="detail-entry">
+              <strong>{r.name}.</strong> {renderEntries(r.entries)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legendary Actions */}
+      {d.legendary && (
+        <div className="detail-section">
+          <div className="detail-section-title legendary"><i className="ra ra-crown" /> Legendary Actions</div>
+          {d.legendaryHeader && (
+            <div className="detail-entry" style={{ fontStyle: 'italic' }}>
+              {renderEntries(d.legendaryHeader)}
+            </div>
+          )}
+          {d.legendary.map((l: any, i: number) => (
+            <div key={i} className="detail-entry">
+              <strong>{l.name}.</strong> {renderEntries(l.entries)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ---- Spellcasting ---- */}
+      {d.spellcasting && (
+        <div className="detail-section">
+          <div className="detail-section-title spells"><i className="ra ra-burning-book" /> Spellcasting</div>
+
+          {/* DC + To Hit Banner */}
+          {(spellInfo.dc || spellInfo.toHit) && (
+            <div className="spell-dc-banner">
+              {spellInfo.dc && (
+                <div className="spell-dc-badge">
+                  <span className="label">DC</span>
+                  <span className="value">{spellInfo.dc}</span>
                 </div>
-              ))}
+              )}
+              <div className="spell-dc-info">
+                {spellInfo.ability && <><strong>{spellInfo.ability}</strong> based spellcaster<br /></>}
+                {spellInfo.toHit && <>Spell attack: <strong>{spellInfo.toHit}</strong></>}
+              </div>
             </div>
           )}
 
-          {combatant.data.spellcasting && (
-            <div style={{ marginBottom: 12 }}>
-              <h4 style={{ margin: '0 0 8px 0', color: '#63b3ed' }}>Spellcasting</h4>
-              {combatant.data.spellcasting.map((sc: any, i: number) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <strong>{sc.name}.</strong> {renderEntries(sc.headerEntries)}
-                  {sc.spells && Object.entries(sc.spells).map(([level, data]: any) => (
-                    <div key={level} style={{ marginLeft: 16, marginTop: 4 }}>
-                      <em>{level === '0' ? 'Cantrips' : `Level ${level}`}{data.slots ? ` (${data.slots} slots)` : ''}:</em> 
-                      {data.spells.map((s: string) => <SpellInfo key={s} spellName={s} />)}
-                    </div>
-                  ))}
-                  {sc.will && <div style={{ marginLeft: 16, marginTop: 4 }}><em>At will:</em> {sc.will.map((s: string) => <SpellInfo key={s} spellName={s} />)}</div>}
-                  {sc.daily && Object.entries(sc.daily).map(([times, spells]: any) => (
-                    <div key={times} style={{ marginLeft: 16, marginTop: 4 }}><em>{times}/day:</em> {spells.map((s: string) => <SpellInfo key={s} spellName={s} />)}</div>
-                  ))}
+          {d.spellcasting.map((sc: any, i: number) => (
+            <div key={i}>
+              <div className="detail-entry" style={{ marginBottom: 12 }}>
+                {parseEntry((sc.headerEntries || []).join(' '))}
+              </div>
+
+              {/* Spell slots */}
+              {sc.spells && Object.entries(sc.spells).map(([level, sData]: [string, any]) => (
+                <div className="spell-level-group" key={level}>
+                  <div className="spell-level-header">
+                    <i className="ra ra-fire" />
+                    {level === '0' ? 'Cantrips (at will)' : `Level ${level}`}
+                    {sData.slots != null && <span className="slots">— {sData.slots} slot{sData.slots > 1 ? 's' : ''}</span>}
+                  </div>
+                  <div className="spell-tags">
+                    {sData.spells.map((s: string) => (
+                      <SpellTag key={s} raw={s} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* At will */}
+              {sc.will && (
+                <div className="spell-level-group">
+                  <div className="spell-level-header"><i className="ra ra-fire" /> At Will</div>
+                  <div className="spell-tags">
+                    {sc.will.map((s: string) => <SpellTag key={s} raw={s} />)}
+                  </div>
+                </div>
+              )}
+
+              {/* Daily */}
+              {sc.daily && Object.entries(sc.daily).map(([times, spells]: [string, any]) => (
+                <div className="spell-level-group" key={times}>
+                  <div className="spell-level-header"><i className="ra ra-fire" /> {times.replace('e', '')}× / day</div>
+                  <div className="spell-tags">
+                    {spells.map((s: string) => <SpellTag key={s} raw={s} />)}
+                  </div>
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function SpellInfo({ spellName }: { spellName: string }) {
+/* ============================================================
+   SPELL TAG (clickable pill that opens the spell modal)
+   ============================================================ */
+function SpellTag({ raw }: { raw: string }) {
   const [open, setOpen] = useState(false);
-  const cleanName = spellName.replace(/{@.*?}/g, '').replace(/{@spell (.*?)}/g, '$1').trim();
+  const cleanName = raw
+    .replace(/{@spell (.*?)(?:\|.*?)?}/g, '$1')
+    .replace(/{@.*?}/g, '')
+    .trim();
   const spellData = findSpell(cleanName);
 
-  if (!spellData) return <span style={{ marginRight: 8, color: '#a0aec0' }}>{cleanName}</span>;
+  if (!spellData) {
+    return (
+      <span className="spell-tag spell-tag-unknown">
+        <i className="ra ra-crystal-ball" /> {cleanName}
+      </span>
+    );
+  }
 
   return (
-    <div style={{ display: 'inline-block', marginRight: 8, marginBottom: 8 }}>
-      <button 
-        onClick={() => setOpen(!open)}
-        style={{ background: '#2b6cb0', color: 'white', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 12, cursor: 'pointer' }}
-      >
-        {spellData.name}
+    <>
+      <button className="spell-tag" onClick={() => setOpen(true)}>
+        <i className="ra ra-crystal-ball" /> {spellData.name}
       </button>
-      {open && (
-        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#1a202c', border: '1px solid #4a5568', padding: 20, borderRadius: 8, zIndex: 100, maxWidth: 500, width: '90%', maxHeight: '80vh', overflowY: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>{spellData.name}</h3>
-            <button onClick={() => setOpen(false)} style={{ background: 'transparent', border: 'none', color: '#fc8181', cursor: 'pointer' }}>X</button>
+      {open && <SpellModal spell={spellData} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/* ============================================================
+   SPELL MODAL
+   ============================================================ */
+function SpellModal({ spell, onClose }: { spell: any; onClose: () => void }) {
+  const levelLabel = spell.level === 0
+    ? 'Cantrip'
+    : `Level ${spell.level}`;
+
+  const schoolName = getSchoolName(spell.school);
+
+  const rangeText = (() => {
+    const r = spell.range;
+    if (!r) return '—';
+    if (r.type === 'point') {
+      if (r.distance?.type === 'self') return 'Self';
+      if (r.distance?.type === 'touch') return 'Touch';
+      return `${r.distance?.amount || ''} ${r.distance?.type || ''}`;
+    }
+    return `${r.distance?.amount || ''} ${r.distance?.type || ''}`;
+  })();
+
+  const durationText = (() => {
+    const d = spell.duration?.[0];
+    if (!d) return '—';
+    if (d.type === 'instant') return 'Instantaneous';
+    if (d.type === 'permanent') return 'Permanent';
+    if (d.type === 'special') return 'Special';
+    const conc = d.concentration ? 'Conc. ' : '';
+    return `${conc}${d.duration?.amount || ''} ${d.duration?.type || ''}`;
+  })();
+
+  const castTime = spell.time?.[0]
+    ? `${spell.time[0].number} ${spell.time[0].unit}`
+    : '—';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="spell-modal" onClick={e => e.stopPropagation()}>
+        <div className="spell-modal-header">
+          <div>
+            <div className="spell-modal-title">{spell.name}</div>
+            <div className="spell-modal-subtitle">{levelLabel} • {schoolName}</div>
           </div>
-          <div style={{ fontSize: 12, color: '#a0aec0', marginBottom: 12 }}>
-            Level {spellData.level} {spellData.school}
-            <br/><strong>Time:</strong> {spellData.time?.[0]?.number} {spellData.time?.[0]?.unit}
-            <br/><strong>Range:</strong> {spellData.range?.distance?.type} {spellData.range?.distance?.amount || ''}
-            <br/><strong>Duration:</strong> {spellData.duration?.[0]?.type === 'instant' ? 'Instantaneous' : `${spellData.duration?.[0]?.duration?.amount || ''} ${spellData.duration?.[0]?.duration?.type || ''}`}
-          </div>
-          <div style={{ fontSize: 14 }}>
-            {renderEntries(spellData.entries)}
-          </div>
+          <button className="spell-modal-close" onClick={onClose}>✕</button>
         </div>
-      )}
+
+        <div className="spell-modal-meta">
+          <span className="spell-meta-tag"><i className="ra ra-stopwatch" /> {castTime}</span>
+          <span className="spell-meta-tag"><i className="ra ra-targeted" /> {rangeText}</span>
+          <span className="spell-meta-tag"><i className="ra ra-hourglass" /> {durationText}</span>
+          {spell.components?.v && <span className="spell-meta-tag">V</span>}
+          {spell.components?.s && <span className="spell-meta-tag">S</span>}
+          {spell.components?.m && (
+            <span className="spell-meta-tag" title={typeof spell.components.m === 'string' ? spell.components.m : spell.components.m?.text}>
+              M
+            </span>
+          )}
+        </div>
+
+        <div className="spell-modal-body">
+          {renderEntries(spell.entries)}
+          {spell.entriesHigherLevel && (
+            <>
+              <br /><br />
+              <strong>At Higher Levels. </strong>
+              {renderEntries(spell.entriesHigherLevel)}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
