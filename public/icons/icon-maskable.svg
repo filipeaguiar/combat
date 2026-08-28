@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e1a28"/>
+      <stop offset="100%" style="stop-color:#0f0d13"/>
+    </linearGradient>
+    <linearGradient id="sword1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f6c744"/>
+      <stop offset="100%" style="stop-color:#a88c2d"/>
+    </linearGradient>
+    <linearGradient id="sword2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e53e3e"/>
+      <stop offset="100%" style="stop-color:#c62828"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Full bleed background for maskable -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Left sword (gold) - scaled down 20% to fit safe zone -->
+  <g transform="translate(256,240) rotate(-45) scale(0.75)" filter="url(#glow)">
+    <rect x="-8" y="-160" width="16" height="140" rx="3" fill="url(#sword1)"/>
+    <polygon points="-8,-160 8,-160 0,-180" fill="url(#sword1)"/>
+    <rect x="-30" y="-22" width="60" height="10" rx="5" fill="#a78bfa"/>
+    <rect x="-6" y="-12" width="12" height="50" rx="3" fill="#6b6580"/>
+    <rect x="-5" y="-8" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="2" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="12" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="22" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <circle cx="0" cy="44" r="8" fill="#a78bfa"/>
+  </g>
+  <!-- Right sword (red) -->
+  <g transform="translate(256,240) rotate(45) scale(0.75)" filter="url(#glow)">
+    <rect x="-8" y="-160" width="16" height="140" rx="3" fill="url(#sword2)"/>
+    <polygon points="-8,-160 8,-160 0,-180" fill="url(#sword2)"/>
+    <rect x="-30" y="-22" width="60" height="10" rx="5" fill="#a78bfa"/>
+    <rect x="-6" y="-12" width="12" height="50" rx="3" fill="#6b6580"/>
+    <rect x="-5" y="-8" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="2" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="12" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="22" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <circle cx="0" cy="44" r="8" fill="#a78bfa"/>
+  </g>
+  <!-- Center diamond -->
+  <g transform="translate(0,-16)" filter="url(#glow)">
+    <polygon points="256,210 272,240 256,270 240,240" fill="#a78bfa" opacity="0.8"/>
+    <polygon points="256,218 266,240 256,262 246,240" fill="#c084fc"/>
+  </g>
+</svg>
