@@ -27,14 +27,26 @@ export default function App() {
   const [error, setError] = useState('');
   const [interactionCount, setInteractionCount] = useState(0);
   const [showNarrative, setShowNarrative] = useState(false);
+  const [enableNarrative, setEnableNarrative] = useState(() => {
+    return localStorage.getItem('combat_narrative') !== 'false';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('combat_narrative', String(enableNarrative));
+  }, [enableNarrative]);
 
   useEffect(() => {
     Promise.all([loadMonsters(), fetchSpells()]).then(() => setLoading(false));
   }, []);
 
   const handleInteraction = () => {
-    setInteractionCount(prev => prev + 1);
-    setShowNarrative(true);
+    setInteractionCount(prev => {
+      const next = prev + 1;
+      if (enableNarrative && next > 0 && next % 3 === 0) {
+        setShowNarrative(true);
+      }
+      return next;
+    });
   };
 
   const startCombat = () => {
@@ -75,8 +87,8 @@ export default function App() {
     }
     setCombatants(newCombatants);
     setScreen('combat');
-    setInteractionCount(1);
-    setShowNarrative(true);
+    setInteractionCount(0);
+    if (enableNarrative) setShowNarrative(true);
   };
 
   /* ---- Loading ---- */
@@ -117,7 +129,21 @@ export default function App() {
                 <i className="ra ra-aware" /> {error}
               </div>
             )}
-            <button className="btn-start" onClick={startCombat}>
+            
+            <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                id="narrativeToggle"
+                checked={enableNarrative}
+                onChange={e => setEnableNarrative(e.target.checked)}
+                style={{ accentColor: 'var(--orange)', width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+              <label htmlFor="narrativeToggle" style={{ fontSize: '14px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                Habilitar lembretes de Narrativa (a cada 3 interações)
+              </label>
+            </div>
+
+            <button className="btn-start" onClick={startCombat} style={{ marginTop: '20px' }}>
               <i className="ra ra-sword" /> Initiate Combat
             </button>
           </div>
@@ -134,7 +160,11 @@ export default function App() {
       {showNarrative && (
         <NarrativeModal 
           count={interactionCount} 
-          onClose={() => setShowNarrative(false)} 
+          onClose={() => setShowNarrative(false)}
+          onDisable={() => {
+            setEnableNarrative(false);
+            setShowNarrative(false);
+          }}
         />
       )}
     </div>
@@ -625,7 +655,7 @@ function SpellModal({ spell, onClose }: { spell: any; onClose: () => void }) {
 /* ============================================================
    NARRATIVE MODAL
    ============================================================ */
-function NarrativeModal({ count, onClose }: { count: number; onClose: () => void }) {
+function NarrativeModal({ count, onClose, onDisable }: { count: number; onClose: () => void; onDisable: () => void }) {
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="spell-modal" onClick={e => e.stopPropagation()} style={{ borderColor: 'var(--orange)', boxShadow: '0 8px 32px rgba(237, 137, 54, 0.2)' }}>
@@ -649,6 +679,12 @@ function NarrativeModal({ count, onClose }: { count: number; onClose: () => void
           </p>
           <button className="btn-start" onClick={onClose} style={{ width: '100%', background: 'var(--orange)' }}>
             Continuar Combate
+          </button>
+          <button
+            onClick={onDisable}
+            style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-secondary)', marginTop: '12px', fontSize: '14px', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            Desativar lembretes
           </button>
         </div>
       </div>
