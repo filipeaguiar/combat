@@ -368,7 +368,8 @@ function CardDetails({ data: d }: { data: any }) {
           <div className="detail-section-title traits"><i className="ra ra-player-dodge" /> Traits</div>
           {d.trait.map((t: any, i: number) => (
             <div key={i} className="detail-entry">
-              <strong>{t.name}.</strong> {renderEntries(t.entries)}
+              <strong>{t.name}.</strong>{' '}
+              <span dangerouslySetInnerHTML={{ __html: renderEntries(t.entries) }} />
             </div>
           ))}
         </div>
@@ -380,7 +381,8 @@ function CardDetails({ data: d }: { data: any }) {
           <div className="detail-section-title actions"><i className="ra ra-sword" /> Actions</div>
           {d.action.map((a: any, i: number) => (
             <div key={i} className="detail-entry">
-              <strong>{a.name}.</strong> {renderEntries(a.entries)}
+              <strong>{a.name}.</strong>{' '}
+              <span dangerouslySetInnerHTML={{ __html: renderEntries(a.entries) }} />
             </div>
           ))}
         </div>
@@ -392,7 +394,8 @@ function CardDetails({ data: d }: { data: any }) {
           <div className="detail-section-title bonus"><i className="ra ra-lightning-bolt" /> Bonus Actions</div>
           {d.bonus.map((b: any, i: number) => (
             <div key={i} className="detail-entry">
-              <strong>{b.name}.</strong> {renderEntries(b.entries)}
+              <strong>{b.name}.</strong>{' '}
+              <span dangerouslySetInnerHTML={{ __html: renderEntries(b.entries) }} />
             </div>
           ))}
         </div>
@@ -404,7 +407,8 @@ function CardDetails({ data: d }: { data: any }) {
           <div className="detail-section-title reactions"><i className="ra ra-circular-shield" /> Reactions</div>
           {d.reaction.map((r: any, i: number) => (
             <div key={i} className="detail-entry">
-              <strong>{r.name}.</strong> {renderEntries(r.entries)}
+              <strong>{r.name}.</strong>{' '}
+              <span dangerouslySetInnerHTML={{ __html: renderEntries(r.entries) }} />
             </div>
           ))}
         </div>
@@ -415,13 +419,14 @@ function CardDetails({ data: d }: { data: any }) {
         <div className="detail-section">
           <div className="detail-section-title legendary"><i className="ra ra-crown" /> Legendary Actions</div>
           {d.legendaryHeader && (
-            <div className="detail-entry" style={{ fontStyle: 'italic' }}>
-              {renderEntries(d.legendaryHeader)}
-            </div>
+            <div className="detail-entry" style={{ fontStyle: 'italic' }}
+              dangerouslySetInnerHTML={{ __html: renderEntries(d.legendaryHeader) }}
+            />
           )}
           {d.legendary.map((l: any, i: number) => (
             <div key={i} className="detail-entry">
-              <strong>{l.name}.</strong> {renderEntries(l.entries)}
+              <strong>{l.name}.</strong>{' '}
+              <span dangerouslySetInnerHTML={{ __html: renderEntries(l.entries) }} />
             </div>
           ))}
         </div>
@@ -450,9 +455,9 @@ function CardDetails({ data: d }: { data: any }) {
 
           {d.spellcasting.map((sc: any, i: number) => (
             <div key={i}>
-              <div className="detail-entry" style={{ marginBottom: 12 }}>
-                {parseEntry((sc.headerEntries || []).join(' '))}
-              </div>
+              <div className="detail-entry" style={{ marginBottom: 12 }}
+                dangerouslySetInnerHTML={{ __html: parseEntry((sc.headerEntries || []).join(' ')) }}
+              />
 
               {/* Spell slots */}
               {sc.spells && Object.entries(sc.spells).map(([level, sData]: [string, any]) => (
@@ -585,16 +590,14 @@ function SpellModal({ spell, onClose }: { spell: any; onClose: () => void }) {
           )}
         </div>
 
-        <div className="spell-modal-body">
-          {renderEntries(spell.entries)}
-          {spell.entriesHigherLevel && (
-            <>
-              <br /><br />
-              <strong>At Higher Levels. </strong>
-              {renderEntries(spell.entriesHigherLevel)}
-            </>
-          )}
-        </div>
+        <div className="spell-modal-body"
+          dangerouslySetInnerHTML={{
+            __html: renderEntries(spell.entries)
+              + (spell.entriesHigherLevel
+                ? '<br/><br/><strong>At Higher Levels. </strong>' + renderEntries(spell.entriesHigherLevel)
+                : '')
+          }}
+        />
       </div>
     </div>
   );

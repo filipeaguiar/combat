@@ -1,13 +1,18 @@
 export function parseEntry(text: string): string {
   if (typeof text !== 'string') return '';
   return text
-    .replace(/{@atk mw}/g, 'Melee Weapon Attack:')
-    .replace(/{@atk rw}/g, 'Ranged Weapon Attack:')
-    .replace(/{@atk mw,rw}/g, 'Melee or Ranged Weapon Attack:')
-    .replace(/{@atk ms}/g, 'Melee Spell Attack:')
-    .replace(/{@atk rs}/g, 'Ranged Spell Attack:')
-    .replace(/{@h}/g, 'Hit: ')
-    .replace(/{@hit (.*?)}/g, '+$1')
+    .replace(/{@atk mw,rw}/g, '<span class="tag-attack">Melee or Ranged Weapon Attack:</span>')
+    .replace(/{@atk mw}/g, '<span class="tag-attack">Melee Weapon Attack:</span>')
+    .replace(/{@atk rw}/g, '<span class="tag-attack">Ranged Weapon Attack:</span>')
+    .replace(/{@atk ms}/g, '<span class="tag-attack">Melee Spell Attack:</span>')
+    .replace(/{@atk rs}/g, '<span class="tag-attack">Ranged Spell Attack:</span>')
+    .replace(/{@h}/g, '<span class="tag-hit-label">Hit:</span> ')
+    .replace(/{@hit (.*?)}/g, '<span class="tag-hit">+$1</span>')
+    .replace(/{@damage (.*?)}/g, '<span class="tag-damage">$1</span>')
+    .replace(/{@dice (.*?)(?:\|.*?)?}/g, '<span class="tag-damage">$1</span>')
+    .replace(/{@dc (.*?)}/g, '<span class="tag-dc">DC $1</span>')
+    .replace(/{@condition (.*?)(?:\|.*?)?}/g, '<span class="tag-condition">$1</span>')
+    .replace(/{@spell (.*?)(?:\|.*?)?}/g, '<em>$1</em>')
     .replace(/{@\w+ (.*?)(?:\|.*?)?}/g, '$1');
 }
 
@@ -18,15 +23,15 @@ export function renderEntries(entries: any[]): string {
     if (e.type === 'list') {
       return e.items.map((i: any) => {
         if (typeof i === 'string') return `• ${parseEntry(i)}`;
-        if (i.type === 'item') return `• ${i.name ? `${i.name}: ` : ''}${renderEntries(i.entries || [])}`;
+        if (i.type === 'item') return `• ${i.name ? `<strong>${i.name}:</strong> ` : ''}${renderEntries(i.entries || [])}`;
         return '';
-      }).join('\n');
+      }).join('<br/>');
     }
     if (e.entries) {
-      return `${e.name ? `${e.name}: ` : ''}${renderEntries(e.entries)}`;
+      return `${e.name ? `<strong>${e.name}:</strong> ` : ''}${renderEntries(e.entries)}`;
     }
     return '';
-  }).join('\n');
+  }).join('<br/>');
 }
 
 export function getHp(monster: any): number {
