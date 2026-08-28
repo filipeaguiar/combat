@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e1a28"/>
+      <stop offset="100%" style="stop-color:#0f0d13"/>
+    </linearGradient>
+    <linearGradient id="sword1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f6c744"/>
+      <stop offset="100%" style="stop-color:#a88c2d"/>
+    </linearGradient>
+    <linearGradient id="sword2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e53e3e"/>
+      <stop offset="100%" style="stop-color:#c62828"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="240" fill="none" stroke="#2a2535" stroke-width="2"/>
+  <circle cx="256" cy="256" r="230" fill="none" stroke="#3d3550" stroke-width="1"/>
+  <!-- Left sword (gold) -->
+  <g transform="translate(256,256) rotate(-45)" filter="url(#glow)">
+    <!-- Blade -->
+    <rect x="-8" y="-160" width="16" height="140" rx="3" fill="url(#sword1)"/>
+    <polygon points="-8,-160 8,-160 0,-180" fill="url(#sword1)"/>
+    <!-- Guard -->
+    <rect x="-30" y="-22" width="60" height="10" rx="5" fill="#a78bfa"/>
+    <!-- Grip -->
+    <rect x="-6" y="-12" width="12" height="50" rx="3" fill="#6b6580"/>
+    <rect x="-5" y="-8" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="2" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="12" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="22" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <!-- Pommel -->
+    <circle cx="0" cy="44" r="8" fill="#a78bfa"/>
+  </g>
+  <!-- Right sword (red) -->
+  <g transform="translate(256,256) rotate(45)" filter="url(#glow)">
+    <!-- Blade -->
+    <rect x="-8" y="-160" width="16" height="140" rx="3" fill="url(#sword2)"/>
+    <polygon points="-8,-160 8,-160 0,-180" fill="url(#sword2)"/>
+    <!-- Guard -->
+    <rect x="-30" y="-22" width="60" height="10" rx="5" fill="#a78bfa"/>
+    <!-- Grip -->
+    <rect x="-6" y="-12" width="12" height="50" rx="3" fill="#6b6580"/>
+    <rect x="-5" y="-8" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="2" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="12" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <rect x="-5" y="22" width="10" height="4" rx="1" fill="#a78bfa" opacity="0.5"/>
+    <!-- Pommel -->
+    <circle cx="0" cy="44" r="8" fill="#a78bfa"/>
+  </g>
+  <!-- Center diamond -->
+  <g filter="url(#glow)">
+    <polygon points="256,220 276,256 256,292 236,256" fill="#a78bfa" opacity="0.8"/>
+    <polygon points="256,228 270,256 256,284 242,256" fill="#c084fc"/>
+  </g>
+  <!-- D20 text hint at bottom -->
+  <text x="256" y="420" text-anchor="middle" font-family="serif" font-size="32" font-weight="bold" fill="#a78bfa" opacity="0.6">COMBAT</text>
+</svg>
