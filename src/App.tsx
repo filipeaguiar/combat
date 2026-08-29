@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { loadMonsters, findMonster, fetchSpells, findSpell } from './api';
+import { loadMonsters, findMonster, fetchSpells, findSpell, searchMonsters } from './api';
 import {
   getHp, getAc, renderEntries, getXp, getCr, getSpeed,
   getMonsterType, getSizeLabel, getModifier, extractSpellDc,
@@ -130,6 +130,12 @@ export default function App() {
               </div>
             )}
             
+            <SetupQuickSearch
+              onSelectMonster={(name) => {
+                setInput(prev => (prev.trim() ? `${prev.trim()}\n1 ${name}` : `1 ${name}`));
+              }}
+            />
+
             <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"
@@ -182,6 +188,27 @@ function CombatScreen({
   onBack: () => void;
   onInteraction: () => void;
 }) {
+  const [showReinforcements, setShowReinforcements] = useState(false);
+
+  const addReinforcements = (name: string, count: number) => {
+    const monster = findMonster(name);
+    if (!monster) return;
+    const existingCount = combatants.filter(c => c.data.name.toLowerCase() === monster.name.toLowerCase()).length;
+    const newCombatants: Combatant[] = [];
+    for (let i = 0; i < count; i++) {
+      const idx = existingCount + i + 1;
+      newCombatants.push({
+        id: `${monster.name}-${Date.now()}-${i}`,
+        name: (existingCount + count > 1) ? `${monster.name} ${idx}` : monster.name,
+        maxHp: getHp(monster),
+        currentHp: getHp(monster),
+        ac: getAc(monster),
+        data: monster,
+      });
+    }
+    setCombatants(prev => [...prev, ...newCombatants]);
+  };
+
   const updateHp = (id: string, delta: number) => {
     setCombatants(prev =>
       prev.map(c =>
@@ -219,9 +246,14 @@ function CombatScreen({
             </div>
           </div>
         </div>
-        <button className="btn-back" onClick={onBack}>
-          <i className="ra ra-arrow-cluster" /> Setup
-        </button>
+        <div className="header-actions">
+          <button className="btn-reinforcements" onClick={() => setShowReinforcements(true)}>
+            <i className="ra ra-dragon" /> + Reforços
+          </button>
+          <button className="btn-back" onClick={onBack}>
+            <i className="ra ra-arrow-cluster" /> Setup
+          </button>
+        </div>
       </div>
 
       {/* Cards */}
@@ -239,6 +271,13 @@ function CombatScreen({
           <i className="ra ra-skull-trophy" />
           <p>All Enemies Vanquished</p>
         </div>
+      )}
+
+      {showReinforcements && (
+        <ReinforcementsModal
+          onAdd={addReinforcements}
+          onClose={() => setShowReinforcements(false)}
+        />
       )}
     </>
   );
@@ -691,3 +730,212 @@ function NarrativeModal({ count, onClose, onDisable }: { count: number; onClose:
     </div>
   );
 }
+
+/* ============================================================
+   REINFORCEMENTS MODAL (with Autocomplete)
+   ============================================================ */
+function ReinforcementsModal({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (name: string, count: number) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [count, setCount] = useState(1);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleQueryChange = (val: string) => {
+    setQuery(val);
+    setError('');
+    if (val.trim().length >= 2) {
+      const results = searchMonsters(val, 8);
+      setSuggestions(results);
+      setShowDropdown(results.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowDropdown(false);
+    }
+  };
+
+  const handleSelectMonster = (monster: any) => {
+    setQuery(monster.name);
+    setShowDropdown(false);
+  };
+
+  const handleAdd = () => {
+    if (!query.trim()) {
+      setError('Por favor, informe o nome da criatura.');
+      return;
+    }
+    const monster = findMonster(query.trim());
+    if (!monster) {
+      setError(`Criatura não encontrada: "${query}"`);
+      return;
+    }
+    onAdd(monster.name, Math.max(1, count));
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
+      <div className="spell-modal" onClick={e => e.stopPropagation()} style={{ borderColor: 'var(--purple)', maxWidth: '440px' }}>
+        <div className="spell-modal-header" style={{ borderBottomColor: 'rgba(167, 139, 250, 0.2)' }}>
+          <div>
+            <div className="spell-modal-title" style={{ color: 'var(--purple-glow)' }}>
+              <i className="ra ra-dragon" /> + Adicionar Reforços
+            </div>
+            <div className="spell-modal-subtitle">Insira novas criaturas no combate em andamento</div>
+          </div>
+          <button className="spell-modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="spell-modal-body" style={{ padding: '20px' }}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Quantidade
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="99"
+              value={count}
+              onChange={e => setCount(parseInt(e.target.value, 10) || 1)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--text-primary)',
+                fontSize: '15px',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '16px' }} className="autocomplete-container">
+            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Nome da Criatura (com autocompletar)
+            </label>
+            <input
+              type="text"
+              className="autocomplete-input"
+              value={query}
+              onChange={e => handleQueryChange(e.target.value)}
+              onFocus={() => {
+                if (query.trim().length >= 2) {
+                  const results = searchMonsters(query, 8);
+                  setSuggestions(results);
+                  setShowDropdown(results.length > 0);
+                }
+              }}
+              placeholder="Ex: goblin, ghoul, adult red dragon..."
+              autoFocus
+            />
+
+            {showDropdown && suggestions.length > 0 && (
+              <div className="autocomplete-dropdown">
+                {suggestions.map(m => (
+                  <div
+                    key={m.name + (m.source || '')}
+                    className="autocomplete-item"
+                    onClick={() => handleSelectMonster(m)}
+                  >
+                    <div className="autocomplete-item-name">{m.name}</div>
+                    <div className="autocomplete-item-meta">
+                      <span>CR {getCr(m)}</span>
+                      <span>•</span>
+                      <span>{getMonsterType(m)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="setup-error" style={{ marginBottom: '16px' }}>
+              <i className="ra ra-aware" /> {error}
+            </div>
+          )}
+
+          <button
+            className="btn-start"
+            onClick={handleAdd}
+            style={{
+              marginTop: '10px',
+              background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
+              boxShadow: '0 4px 20px rgba(168, 85, 247, 0.3)',
+            }}
+          >
+            <i className="ra ra-crossed-swords" /> Inserir no Combate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SETUP QUICK SEARCH (Autocomplete Helper in Setup)
+   ============================================================ */
+function SetupQuickSearch({ onSelectMonster }: { onSelectMonster: (name: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [show, setShow] = useState(false);
+
+  const handleChange = (val: string) => {
+    setSearch(val);
+    if (val.trim().length >= 2) {
+      const res = searchMonsters(val, 6);
+      setResults(res);
+      setShow(res.length > 0);
+    } else {
+      setResults([]);
+      setShow(false);
+    }
+  };
+
+  return (
+    <div className="quick-search-box">
+      <div className="quick-search-label">
+        <i className="ra ra-crystal-ball" /> Autocompletar / Buscar Criatura para Inserir:
+      </div>
+      <div className="autocomplete-container">
+        <input
+          type="text"
+          className="autocomplete-input"
+          style={{ fontSize: '13px', padding: '8px 12px' }}
+          value={search}
+          onChange={e => handleChange(e.target.value)}
+          placeholder="Digite para autocompletar (ex: goblin, cultist, dragon...)"
+        />
+        {show && results.length > 0 && (
+          <div className="autocomplete-dropdown">
+            {results.map(m => (
+              <div
+                key={m.name + (m.source || '')}
+                className="autocomplete-item"
+                onClick={() => {
+                  onSelectMonster(m.name);
+                  setSearch('');
+                  setShow(false);
+                }}
+              >
+                <div className="autocomplete-item-name">+ Inserir {m.name}</div>
+                <div className="autocomplete-item-meta">
+                  <span>CR {getCr(m)}</span>
+                  <span>•</span>
+                  <span>{getMonsterType(m)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

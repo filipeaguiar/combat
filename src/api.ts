@@ -38,6 +38,30 @@ export function findMonster(name: string) {
   return cachedMonsters.find(m => m.name.toLowerCase() === query);
 }
 
+export function searchMonsters(query: string, limit = 10) {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+  const seen = new Set<string>();
+  const matches: any[] = [];
+  for (const m of cachedMonsters) {
+    const nameLower = m.name.toLowerCase();
+    if (nameLower.includes(q) && !seen.has(nameLower)) {
+      seen.add(nameLower);
+      matches.push(m);
+      if (matches.length >= limit) break;
+    }
+  }
+  return matches;
+}
+
+export function getAllMonsterNames(): string[] {
+  const names = new Set<string>();
+  for (const m of cachedMonsters) {
+    names.add(m.name);
+  }
+  return Array.from(names);
+}
+
 const SPELL_BOOKS = [
   'spells/spells-xphb.json',
   'spells/spells-phb.json',
