@@ -16,12 +16,21 @@ type Combatant = {
   data: any;
 };
 
+type RosterItem = {
+  id: string;
+  monster: any;
+  count: number;
+};
+
 /* ============================================================
    APP ROOT
    ============================================================ */
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [input, setInput] = useState('1 cult fanatic\n2 ghoul');
+  const [roster, setRoster] = useState<RosterItem[]>([]);
+  const [setupInput, setSetupInput] = useState('');
+  const [setupSuggestions, setSetupSuggestions] = useState<any[]>([]);
+  const [showSetupDropdown, setShowSetupDropdown] = useState(false);
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [screen, setScreen] = useState<'setup' | 'combat'>('setup');
   const [error, setError] = useState('');
@@ -36,7 +45,15 @@ export default function App() {
   }, [enableNarrative]);
 
   useEffect(() => {
-    Promise.all([loadMonsters(), fetchSpells()]).then(() => setLoading(false));
+    Promise.all([loadMonsters(), fetchSpells()]).then(() => {
+      setLoading(false);
+      const fanatic = findMonster('cult fanatic');
+      const ghoul = findMonster('ghoul');
+      const initial: RosterItem[] = [];
+      if (fanatic) initial.push({ id: `cult-fanatic-init`, monster: fanatic, count: 1 });
+      if (ghoul) initial.push({ id: `ghoul-init`, monster: ghoul, count: 2 });
+      setRoster(initial);
+    });
   }, []);
 
   const handleInteraction = () => {
@@ -49,35 +66,92 @@ export default function App() {
     });
   };
 
-  const startCombat = () => {
+  const parseQuantityAndName = (text: string) => {
+    const trimmed = text.trim();
+    const match = trimmed.match(/^(\d+)\s*(.*)$/);
+    if (match) {
+      return {
+        count: Math.max(1, parseInt(match[1], 10) || 1),
+        query: match[2].trim(),
+      };
+    }
+    return { count: 1, query: trimmed };
+  };
+
+  const handleSetupInputChange = (val: string) => {
+    setSetupInput(val);
     setError('');
-    const lines = input.split('\n').filter(l => l.trim() !== '');
+    const { query } = parseQuantityAndName(val);
+    if (query.length >= 2) {
+      const results = searchMonsters(query, 8);
+      setSetupSuggestions(results);
+      setShowSetupDropdown(results.length > 0);
+    } else {
+      setSetupSuggestions([]);
+      setShowSetupDropdown(false);
+    }
+  };
+
+  const addMonsterToRoster = (monster: any, countToAdd: number) => {
+    setRoster(prev => {
+      const existingIdx = prev.findIndex(item => item.monster.name.toLowerCase() === monster.name.toLowerCase());
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          count: updated[existingIdx].count + countToAdd,
+        };
+        return updated;
+      }
+      return [...prev, { id: `${monster.name}-${Date.now()}`, monster, count: countToAdd }];
+    });
+    setSetupInput('');
+    setSetupSuggestions([]);
+    setShowSetupDropdown(false);
+    setError('');
+  };
+
+  const handleAddSubmit = () => {
+    const { count, query } = parseQuantityAndName(setupInput);
+    if (!query) {
+      setError('Digite o nome da criatura (ex: 2 cultist ou goblin)');
+      return;
+    }
+    const monster = findMonster(query);
+    if (!monster) {
+      setError(`Criatura não encontrada: "${query}"`);
+      return;
+    }
+    addMonsterToRoster(monster, count);
+  };
+
+  const updateRosterCount = (id: string, delta: number) => {
+    setRoster(prev => {
+      return prev
+        .map(item => item.id === id ? { ...item, count: item.count + delta } : item)
+        .filter(item => item.count > 0);
+    });
+  };
+
+  const removeRosterItem = (id: string) => {
+    setRoster(prev => prev.filter(item => item.id !== id));
+  };
+
+  const startCombat = () => {
+    if (roster.length === 0) {
+      setError('Adicione pelo menos uma criatura ao encontro!');
+      return;
+    }
+    setError('');
     const newCombatants: Combatant[] = [];
     let idCounter = 1;
 
-    for (const line of lines) {
-      const match = line.trim().match(/^(\d+)\s+(.+)$/);
-      if (match) {
-        const count = parseInt(match[1], 10);
-        const name = match[2];
-        const monster = findMonster(name);
-        if (!monster) { setError(`Monster not found: "${name}"`); return; }
-        for (let i = 0; i < count; i++) {
-          newCombatants.push({
-            id: `${name}-${idCounter++}`,
-            name: count > 1 ? `${monster.name} ${i + 1}` : monster.name,
-            maxHp: getHp(monster),
-            currentHp: getHp(monster),
-            ac: getAc(monster),
-            data: monster,
-          });
-        }
-      } else {
-        const monster = findMonster(line.trim());
-        if (!monster) { setError(`Monster not found: "${line.trim()}"`); return; }
+    for (const item of roster) {
+      const { monster, count } = item;
+      for (let i = 0; i < count; i++) {
         newCombatants.push({
-          id: `${line}-${idCounter++}`,
-          name: monster.name,
+          id: `${monster.name}-${idCounter++}`,
+          name: count > 1 ? `${monster.name} ${i + 1}` : monster.name,
           maxHp: getHp(monster),
           currentHp: getHp(monster),
           ac: getAc(monster),
@@ -90,6 +164,9 @@ export default function App() {
     setInteractionCount(0);
     if (enableNarrative) setShowNarrative(true);
   };
+
+  const totalRosterCreatures = roster.reduce((sum, item) => sum + item.count, 0);
+  const totalRosterXp = roster.reduce((sum, item) => sum + (getXp(item.monster) * item.count), 0);
 
   /* ---- Loading ---- */
   if (loading) {
@@ -116,26 +193,143 @@ export default function App() {
           <div className="setup-card">
             <label className="setup-label">
               <i className="ra ra-scroll-unfurled" />
-              Encounter Roster
+              Adicionar Criaturas
             </label>
-            <textarea
-              className="setup-textarea"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder={'1 cult fanatic\n2 ghoul\n1 ogre'}
-            />
+
+            {/* Input with Autocomplete & Quantity */}
+            <div className="setup-search-row">
+              <div className="autocomplete-container" style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  className="autocomplete-input"
+                  value={setupInput}
+                  onChange={e => handleSetupInputChange(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleAddSubmit();
+                  }}
+                  onFocus={() => {
+                    const { query } = parseQuantityAndName(setupInput);
+                    if (query.length >= 2) {
+                      const results = searchMonsters(query, 8);
+                      setSetupSuggestions(results);
+                      setShowSetupDropdown(results.length > 0);
+                    }
+                  }}
+                  placeholder="Ex: 2 cultist ou goblin..."
+                />
+
+                {showSetupDropdown && setupSuggestions.length > 0 && (
+                  <div className="autocomplete-dropdown">
+                    {setupSuggestions.map(m => {
+                      const { count } = parseQuantityAndName(setupInput);
+                      return (
+                        <div
+                          key={m.name + (m.source || '')}
+                          className="autocomplete-item"
+                          onClick={() => addMonsterToRoster(m, count)}
+                        >
+                          <div className="autocomplete-item-name">
+                            + {count > 1 ? `${count}x ` : ''}{m.name}
+                          </div>
+                          <div className="autocomplete-item-meta">
+                            <span>CR {getCr(m)}</span>
+                            <span>•</span>
+                            <span>{getMonsterType(m)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button className="btn-add-roster" onClick={handleAddSubmit}>
+                <i className="ra ra-health" /> Inserir
+              </button>
+            </div>
+
             {error && (
               <div className="setup-error">
                 <i className="ra ra-aware" /> {error}
               </div>
             )}
-            
-            <SetupQuickSearch
-              onSelectMonster={(name) => {
-                setInput(prev => (prev.trim() ? `${prev.trim()}\n1 ${name}` : `1 ${name}`));
-              }}
-            />
 
+            {/* Roster List Header */}
+            <label className="setup-label" style={{ marginTop: '10px' }}>
+              <i className="ra ra-dragon" />
+              Inimigos no Encontro ({totalRosterCreatures})
+            </label>
+
+            {/* Roster List */}
+            {roster.length > 0 ? (
+              <>
+                <div className="roster-list">
+                  {roster.map(item => {
+                    const m = item.monster;
+                    return (
+                      <div key={item.id} className="roster-item">
+                        <div className="roster-item-info">
+                          <div className="roster-item-name">
+                            <i className="ra ra-dragon" />
+                            {m.name}
+                          </div>
+                          <div className="roster-item-meta">
+                            <span className="cr">CR {getCr(m)}</span>
+                            <span>•</span>
+                            <span className="hp">{getHp(m)} HP</span>
+                            <span>•</span>
+                            <span className="ac">CA {getAc(m)}</span>
+                            <span>•</span>
+                            <span>{getSizeLabel(m.size)} {getMonsterType(m)}</span>
+                          </div>
+                        </div>
+
+                        <div className="roster-item-controls">
+                          <div className="roster-stepper">
+                            <button
+                              className="roster-btn-step"
+                              onClick={() => updateRosterCount(item.id, -1)}
+                              title="Diminuir"
+                            >
+                              -
+                            </button>
+                            <div className="roster-count">{item.count}</div>
+                            <button
+                              className="roster-btn-step"
+                              onClick={() => updateRosterCount(item.id, 1)}
+                              title="Aumentar"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <button
+                            className="roster-btn-remove"
+                            onClick={() => removeRosterItem(item.id)}
+                            title="Remover"
+                          >
+                            <i className="ra ra-cancel" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Summary */}
+                <div className="roster-summary">
+                  <div>Total de Criaturas: <strong>{totalRosterCreatures}</strong></div>
+                  <div>XP Total: <strong>{totalRosterXp.toLocaleString()} XP</strong></div>
+                </div>
+              </>
+            ) : (
+              <div className="roster-empty">
+                <i className="ra ra-scroll-unfurled" />
+                Nenhuma criatura adicionada ainda.<br />
+                Digite o nome no campo acima (ex: <em>2 ghoul</em> ou <em>cultist</em>).
+              </div>
+            )}
+
+            {/* Narrative Toggle */}
             <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"
@@ -150,7 +344,7 @@ export default function App() {
             </div>
 
             <button className="btn-start" onClick={startCombat} style={{ marginTop: '20px' }}>
-              <i className="ra ra-sword" /> Initiate Combat
+              <i className="ra ra-sword" /> Iniciar Combate
             </button>
           </div>
         </div>
@@ -878,64 +1072,4 @@ function ReinforcementsModal({
   );
 }
 
-/* ============================================================
-   SETUP QUICK SEARCH (Autocomplete Helper in Setup)
-   ============================================================ */
-function SetupQuickSearch({ onSelectMonster }: { onSelectMonster: (name: string) => void }) {
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<any[]>([]);
-  const [show, setShow] = useState(false);
-
-  const handleChange = (val: string) => {
-    setSearch(val);
-    if (val.trim().length >= 2) {
-      const res = searchMonsters(val, 6);
-      setResults(res);
-      setShow(res.length > 0);
-    } else {
-      setResults([]);
-      setShow(false);
-    }
-  };
-
-  return (
-    <div className="quick-search-box">
-      <div className="quick-search-label">
-        <i className="ra ra-crystal-ball" /> Autocompletar / Buscar Criatura para Inserir:
-      </div>
-      <div className="autocomplete-container">
-        <input
-          type="text"
-          className="autocomplete-input"
-          style={{ fontSize: '13px', padding: '8px 12px' }}
-          value={search}
-          onChange={e => handleChange(e.target.value)}
-          placeholder="Digite para autocompletar (ex: goblin, cultist, dragon...)"
-        />
-        {show && results.length > 0 && (
-          <div className="autocomplete-dropdown">
-            {results.map(m => (
-              <div
-                key={m.name + (m.source || '')}
-                className="autocomplete-item"
-                onClick={() => {
-                  onSelectMonster(m.name);
-                  setSearch('');
-                  setShow(false);
-                }}
-              >
-                <div className="autocomplete-item-name">+ Inserir {m.name}</div>
-                <div className="autocomplete-item-meta">
-                  <span>CR {getCr(m)}</span>
-                  <span>•</span>
-                  <span>{getMonsterType(m)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 

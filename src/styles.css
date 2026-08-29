@@ -180,33 +180,204 @@ body {
   color: var(--purple);
 }
 
-.setup-textarea {
-  width: 100%;
-  min-height: 180px;
-  padding: 16px;
-  background: var(--bg-input);
-  color: var(--text-primary);
+.setup-search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.btn-add-roster {
+  padding: 0 18px;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(192, 132, 252, 0.3));
+  color: var(--purple-glow);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.btn-add-roster:hover {
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(192, 132, 252, 0.45));
+  border-color: var(--purple);
+  transform: translateY(-1px);
+}
+
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.roster-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  padding: 12px 14px;
+  gap: 12px;
+  transition: all 0.15s;
+}
+
+.roster-item:hover {
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.roster-item-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.roster-item-name {
+  font-family: var(--font-display);
   font-size: 15px;
-  line-height: 1.8;
-  resize: vertical;
-  transition: border-color 0.2s;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.setup-textarea:focus {
-  outline: none;
-  border-color: var(--purple);
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
+.roster-item-name .ra {
+  color: var(--purple);
+  font-size: 14px;
 }
 
-.setup-textarea::placeholder {
+.roster-item-meta {
+  font-size: 12px;
   color: var(--text-muted);
+  margin-top: 3px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roster-item-meta span.cr {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.roster-item-meta span.hp {
+  color: var(--green);
+}
+
+.roster-item-meta span.ac {
+  color: var(--purple-glow);
+}
+
+.roster-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.roster-stepper {
+  display: flex;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.roster-btn-step {
+  width: 30px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.roster-btn-step:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.roster-count {
+  min-width: 28px;
+  text-align: center;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.roster-btn-remove {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.roster-btn-remove:hover {
+  background: rgba(229, 62, 62, 0.15);
+  border-color: rgba(229, 62, 62, 0.3);
+  color: var(--red);
+}
+
+.roster-empty {
+  text-align: center;
+  padding: 36px 16px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.roster-empty .ra {
+  font-size: 28px;
+  margin-bottom: 8px;
+  display: block;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.roster-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.roster-summary strong {
+  color: var(--gold);
 }
 
 .setup-error {
-  margin-top: 12px;
+  margin-bottom: 16px;
   padding: 10px 14px;
   background: rgba(229, 62, 62, 0.1);
   border: 1px solid rgba(229, 62, 62, 0.3);
