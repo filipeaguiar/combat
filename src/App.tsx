@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { loadMonsters, findMonster, fetchSpells, findSpell, searchMonsters } from './api';
 import {
   getHp, getAc, renderEntries, getXp, getCr, getSpeed,
@@ -7,20 +8,58 @@ import {
 } from './utils';
 import './styles.css';
 
+/* ============================================================
+   TYPES
+   ============================================================ */
 type Combatant = {
   id: string;
   name: string;
   maxHp: number;
   currentHp: number;
   ac: number;
-  data: any;
+  initiative: number;
+  isPlayer: boolean;
+  data: any; // null for PCs
+};
+
+type SavedPC = {
+  id: string;
+  name: string;
+  maxHp: number;
+  ac: number;
 };
 
 type RosterItem = {
   id: string;
   monster: any;
   count: number;
+  initiative: number; // shared initiative for all instances of this monster type
 };
+
+/* ============================================================
+   LOCAL STORAGE HELPERS
+   ============================================================ */
+const LS_PCS_KEY = 'combat_saved_pcs';
+
+function loadSavedPCs(): SavedPC[] {
+  try {
+    const raw = localStorage.getItem(LS_PCS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function savePCs(pcs: SavedPC[]): void {
+  try {
+    localStorage.setItem(LS_PCS_KEY, JSON.stringify(pcs));
+  } catch {
+    // silently ignore storage errors
+  }
+}
 
 /* ============================================================
    APP ROOT
@@ -40,6 +79,15 @@ export default function App() {
     return localStorage.getItem('combat_narrative') !== 'false';
   });
 
+  // Player Characters state
+  const [savedPCs, setSavedPCs] = useState<SavedPC[]>(() => loadSavedPCs());
+  const [selectedPCIds, setSelectedPCIds] = useState<Set<string>>(new Set());
+  const [pcInitiatives, setPcInitiatives] = useState<Record<string, number>>({});
+
+  // Combat turn tracking
+  const [currentTurn, setCurrentTurn] = useState(0);
+  const [round, setRound] = useState(1);
+
   useEffect(() => {
     localStorage.setItem('combat_narrative', String(enableNarrative));
   }, [enableNarrative]);
@@ -50,8 +98,8 @@ export default function App() {
       const fanatic = findMonster('cult fanatic');
       const ghoul = findMonster('ghoul');
       const initial: RosterItem[] = [];
-      if (fanatic) initial.push({ id: `cult-fanatic-init`, monster: fanatic, count: 1 });
-      if (ghoul) initial.push({ id: `ghoul-init`, monster: ghoul, count: 2 });
+      if (fanatic) initial.push({ id: `cult-fanatic-init`, monster: fanatic, count: 1, initiative: 0 });
+      if (ghoul) initial.push({ id: `ghoul-init`, monster: ghoul, count: 2, initiative: 0 });
       setRoster(initial);
     });
   }, []);
@@ -103,7 +151,7 @@ export default function App() {
         };
         return updated;
       }
-      return [...prev, { id: `${monster.name}-${Date.now()}`, monster, count: countToAdd }];
+      return [...prev, { id: `${monster.name}-${Date.now()}`, monster, count: countToAdd, initiative: 0 }];
     });
     setSetupInput('');
     setSetupSuggestions([]);
@@ -137,17 +185,24 @@ export default function App() {
     setRoster(prev => prev.filter(item => item.id !== id));
   };
 
+  const updateRosterInitiative = (id: string, initiative: number) => {
+    setRoster(prev => prev.map(item => item.id === id ? { ...item, initiative } : item));
+  };
+
   const startCombat = () => {
-    if (roster.length === 0) {
-      setError('Adicione pelo menos uma criatura ao encontro!');
+    const hasMonsters = roster.length > 0;
+    const hasPlayers = selectedPCIds.size > 0;
+    if (!hasMonsters && !hasPlayers) {
+      setError('Adicione pelo menos uma criatura ou personagem ao encontro!');
       return;
     }
     setError('');
     const newCombatants: Combatant[] = [];
     let idCounter = 1;
 
+    // Add monsters
     for (const item of roster) {
-      const { monster, count } = item;
+      const { monster, count, initiative } = item;
       for (let i = 0; i < count; i++) {
         newCombatants.push({
           id: `${monster.name}-${idCounter++}`,
@@ -155,11 +210,35 @@ export default function App() {
           maxHp: getHp(monster),
           currentHp: getHp(monster),
           ac: getAc(monster),
+          initiative,
+          isPlayer: false,
           data: monster,
         });
       }
     }
+
+    // Add selected PCs
+    for (const pc of savedPCs) {
+      if (selectedPCIds.has(pc.id)) {
+        newCombatants.push({
+          id: `pc-${pc.id}-${idCounter++}`,
+          name: pc.name,
+          maxHp: pc.maxHp,
+          currentHp: pc.maxHp,
+          ac: pc.ac,
+          initiative: pcInitiatives[pc.id] ?? 0,
+          isPlayer: true,
+          data: null,
+        });
+      }
+    }
+
+    // Sort by initiative descending
+    newCombatants.sort((a, b) => b.initiative - a.initiative);
+
     setCombatants(newCombatants);
+    setCurrentTurn(0);
+    setRound(1);
     setScreen('combat');
     setInteractionCount(0);
     if (enableNarrative) setShowNarrative(true);
@@ -167,6 +246,66 @@ export default function App() {
 
   const totalRosterCreatures = roster.reduce((sum, item) => sum + item.count, 0);
   const totalRosterXp = roster.reduce((sum, item) => sum + (getXp(item.monster) * item.count), 0);
+
+  /* ---- Saved PC CRUD ---- */
+  const [pcForm, setPcForm] = useState<{ name: string; maxHp: string; ac: string }>({ name: '', maxHp: '', ac: '' });
+  const [pcFormError, setPcFormError] = useState('');
+  const [editingPCId, setEditingPCId] = useState<string | null>(null);
+
+  const handlePCFormSubmit = () => {
+    const name = pcForm.name.trim();
+    const maxHp = parseInt(pcForm.maxHp, 10);
+    const ac = parseInt(pcForm.ac, 10);
+    if (!name) { setPcFormError('Nome é obrigatório.'); return; }
+    if (isNaN(maxHp) || maxHp <= 0) { setPcFormError('HP Máximo deve ser maior que 0.'); return; }
+    if (isNaN(ac) || ac <= 0) { setPcFormError('Armor Class deve ser maior que 0.'); return; }
+    setPcFormError('');
+
+    if (editingPCId) {
+      const updated = savedPCs.map(pc => pc.id === editingPCId ? { ...pc, name, maxHp, ac } : pc);
+      setSavedPCs(updated);
+      savePCs(updated);
+      setEditingPCId(null);
+    } else {
+      const newPC: SavedPC = { id: `pc-${Date.now()}`, name, maxHp, ac };
+      const updated = [...savedPCs, newPC];
+      setSavedPCs(updated);
+      savePCs(updated);
+    }
+    setPcForm({ name: '', maxHp: '', ac: '' });
+  };
+
+  const startEditPC = (pc: SavedPC) => {
+    setEditingPCId(pc.id);
+    setPcForm({ name: pc.name, maxHp: String(pc.maxHp), ac: String(pc.ac) });
+    setPcFormError('');
+  };
+
+  const cancelEditPC = () => {
+    setEditingPCId(null);
+    setPcForm({ name: '', maxHp: '', ac: '' });
+    setPcFormError('');
+  };
+
+  const removePC = (id: string) => {
+    const updated = savedPCs.filter(pc => pc.id !== id);
+    setSavedPCs(updated);
+    savePCs(updated);
+    setSelectedPCIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+  };
+
+  const togglePCSelected = (id: string) => {
+    setSelectedPCIds(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return s;
+    });
+  };
+
+  const updatePCInitiative = (id: string, value: number) => {
+    setPcInitiatives(prev => ({ ...prev, [id]: value }));
+  };
 
   /* ---- Loading ---- */
   if (loading) {
@@ -190,6 +329,151 @@ export default function App() {
           </h1>
           <p className="setup-subtitle">Track your D&D 5e encounters with data from 5e.tools</p>
 
+          {/* ===== PLAYER CHARACTERS SECTION ===== */}
+          <div className="setup-card" style={{ marginBottom: '16px' }}>
+            <label className="setup-label">
+              <i className="ra ra-player" style={{ color: 'var(--blue)' }} />
+              Personagens dos Jogadores
+            </label>
+
+            {/* PC List */}
+            {savedPCs.length > 0 ? (
+              <div className="roster-list" style={{ marginBottom: '16px' }}>
+                {savedPCs.map(pc => (
+                  <div key={pc.id} className={`roster-item pc-roster-item${selectedPCIds.has(pc.id) ? ' pc-selected' : ''}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPCIds.has(pc.id)}
+                        onChange={() => togglePCSelected(pc.id)}
+                        style={{ accentColor: 'var(--blue)', width: '16px', height: '16px', cursor: 'pointer', flexShrink: 0 }}
+                        title="Incluir no combate"
+                      />
+                      {editingPCId === pc.id ? (
+                        <div className="pc-edit-form" style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              className="pc-input"
+                              placeholder="Nome"
+                              value={pcForm.name}
+                              onChange={e => setPcForm(f => ({ ...f, name: e.target.value }))}
+                              style={{ flex: '1 1 120px', minWidth: '100px' }}
+                            />
+                            <input
+                              type="number"
+                              className="pc-input"
+                              placeholder="HP Máx"
+                              value={pcForm.maxHp}
+                              min="1"
+                              onChange={e => setPcForm(f => ({ ...f, maxHp: e.target.value }))}
+                              style={{ width: '80px' }}
+                            />
+                            <input
+                              type="number"
+                              className="pc-input"
+                              placeholder="CA"
+                              value={pcForm.ac}
+                              min="1"
+                              onChange={e => setPcForm(f => ({ ...f, ac: e.target.value }))}
+                              style={{ width: '70px' }}
+                            />
+                            <button className="pc-btn-save" onClick={handlePCFormSubmit}>Salvar</button>
+                            <button className="pc-btn-cancel" onClick={cancelEditPC}>Cancelar</button>
+                          </div>
+                          {pcFormError && <div className="pc-form-error">{pcFormError}</div>}
+                        </div>
+                      ) : (
+                        <div className="roster-item-info">
+                          <div className="roster-item-name">
+                            <i className="ra ra-player" style={{ color: 'var(--blue)', fontSize: '14px' }} />
+                            {pc.name}
+                          </div>
+                          <div className="roster-item-meta">
+                            <span style={{ color: 'var(--green)' }}>{pc.maxHp} HP</span>
+                            <span>•</span>
+                            <span style={{ color: 'var(--blue)' }}>CA {pc.ac}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {editingPCId !== pc.id && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        {selectedPCIds.has(pc.id) && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Init</label>
+                            <input
+                              type="number"
+                              className="pc-initiative-input"
+                              value={pcInitiatives[pc.id] ?? 0}
+                              onChange={e => updatePCInitiative(pc.id, parseInt(e.target.value, 10) || 0)}
+                              title="Iniciativa"
+                            />
+                          </div>
+                        )}
+                        <button className="btn-icon" onClick={() => startEditPC(pc)} title="Editar">
+                          <i className="ra ra-quill-ink" />
+                        </button>
+                        <button className="btn-icon danger" onClick={() => removePC(pc.id)} title="Remover">
+                          <i className="ra ra-burning-embers" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="roster-empty" style={{ marginBottom: '16px' }}>
+                <i className="ra ra-player" style={{ color: 'var(--blue)', opacity: 0.4 }} />
+                Nenhum personagem cadastrado ainda.<br />
+                Adicione os jogadores abaixo para salvá-los para sessões futuras.
+              </div>
+            )}
+
+            {/* Add PC Form (only shown if not editing) */}
+            {!editingPCId && (
+              <div className="pc-add-form">
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                  <input
+                    type="text"
+                    className="pc-input"
+                    placeholder="Nome do personagem"
+                    value={pcForm.name}
+                    onChange={e => setPcForm(f => ({ ...f, name: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handlePCFormSubmit(); }}
+                    style={{ flex: '1 1 140px', minWidth: '120px' }}
+                  />
+                  <input
+                    type="number"
+                    className="pc-input"
+                    placeholder="HP Máx"
+                    value={pcForm.maxHp}
+                    min="1"
+                    onChange={e => setPcForm(f => ({ ...f, maxHp: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handlePCFormSubmit(); }}
+                    style={{ width: '85px' }}
+                  />
+                  <input
+                    type="number"
+                    className="pc-input"
+                    placeholder="CA"
+                    value={pcForm.ac}
+                    min="1"
+                    onChange={e => setPcForm(f => ({ ...f, ac: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handlePCFormSubmit(); }}
+                    style={{ width: '70px' }}
+                  />
+                  <button className="pc-btn-save" onClick={handlePCFormSubmit}>
+                    <i className="ra ra-plus" /> Salvar PC
+                  </button>
+                </div>
+                {pcFormError && <div className="pc-form-error">{pcFormError}</div>}
+              </div>
+            )}
+          </div>
+
+          {/* ===== MONSTERS SECTION ===== */}
           <div className="setup-card">
             <label className="setup-label">
               <i className="ra ra-scroll-unfurled" />
@@ -285,6 +569,17 @@ export default function App() {
                         </div>
 
                         <div className="roster-item-controls">
+                          {/* Initiative input for monsters */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Init</label>
+                            <input
+                              type="number"
+                              className="pc-initiative-input"
+                              value={item.initiative}
+                              onChange={e => updateRosterInitiative(item.id, parseInt(e.target.value, 10) || 0)}
+                              title="Iniciativa"
+                            />
+                          </div>
                           <div className="roster-stepper">
                             <button
                               className="roster-btn-step"
@@ -352,14 +647,18 @@ export default function App() {
         <CombatScreen
           combatants={combatants}
           setCombatants={setCombatants}
+          currentTurn={currentTurn}
+          setCurrentTurn={setCurrentTurn}
+          round={round}
+          setRound={setRound}
           onBack={() => setScreen('setup')}
           onInteraction={handleInteraction}
         />
       )}
 
       {showNarrative && (
-        <NarrativeModal 
-          count={interactionCount} 
+        <NarrativeModal
+          count={interactionCount}
           onClose={() => setShowNarrative(false)}
           onDisable={() => {
             setEnableNarrative(false);
@@ -375,19 +674,23 @@ export default function App() {
    COMBAT SCREEN
    ============================================================ */
 function CombatScreen({
-  combatants, setCombatants, onBack, onInteraction,
+  combatants, setCombatants, currentTurn, setCurrentTurn, round, setRound, onBack, onInteraction,
 }: {
   combatants: Combatant[];
   setCombatants: React.Dispatch<React.SetStateAction<Combatant[]>>;
+  currentTurn: number;
+  setCurrentTurn: React.Dispatch<React.SetStateAction<number>>;
+  round: number;
+  setRound: React.Dispatch<React.SetStateAction<number>>;
   onBack: () => void;
   onInteraction: () => void;
 }) {
   const [showReinforcements, setShowReinforcements] = useState(false);
 
-  const addReinforcements = (name: string, count: number) => {
+  const addReinforcements = (name: string, count: number, initiative: number) => {
     const monster = findMonster(name);
     if (!monster) return;
-    const existingCount = combatants.filter(c => c.data.name.toLowerCase() === monster.name.toLowerCase()).length;
+    const existingCount = combatants.filter(c => c.data && c.data.name.toLowerCase() === monster.name.toLowerCase()).length;
     const newCombatants: Combatant[] = [];
     for (let i = 0; i < count; i++) {
       const idx = existingCount + i + 1;
@@ -397,10 +700,16 @@ function CombatScreen({
         maxHp: getHp(monster),
         currentHp: getHp(monster),
         ac: getAc(monster),
+        initiative,
+        isPlayer: false,
         data: monster,
       });
     }
-    setCombatants(prev => [...prev, ...newCombatants]);
+    setCombatants(prev => {
+      const updated = [...prev, ...newCombatants];
+      updated.sort((a, b) => b.initiative - a.initiative);
+      return updated;
+    });
   };
 
   const updateHp = (id: string, delta: number) => {
@@ -414,12 +723,65 @@ function CombatScreen({
     onInteraction();
   };
 
-  const removeCombatant = (id: string) => {
-    setCombatants(prev => prev.filter(c => c.id !== id));
+  const updateCombatant = (id: string, fields: Partial<Combatant>) => {
+    setCombatants(prev => {
+      const currentCombatantId = prev[currentTurn]?.id;
+      let updated = prev.map(c => c.id === id ? { ...c, ...fields } : c);
+
+      // If initiative changed, re-sort and adjust currentTurn
+      if (fields.initiative !== undefined) {
+        updated = [...updated].sort((a, b) => b.initiative - a.initiative);
+        const newTurnIdx = updated.findIndex(c => c.id === currentCombatantId);
+        if (newTurnIdx >= 0) setCurrentTurn(newTurnIdx);
+      }
+      return updated;
+    });
   };
 
-  const totalXp = combatants.reduce((sum, c) => sum + getXp(c.data), 0);
+  const removeCombatant = (id: string) => {
+    setCombatants(prev => {
+      const currentId = prev[currentTurn]?.id;
+      const filtered = prev.filter(c => c.id !== id);
+      // Adjust currentTurn so it stays on the same combatant if possible
+      const newIdx = filtered.findIndex(c => c.id === currentId);
+      if (newIdx >= 0) setCurrentTurn(newIdx);
+      else setCurrentTurn(Math.min(currentTurn, Math.max(0, filtered.length - 1)));
+      return filtered;
+    });
+  };
+
+  const nextTurn = () => {
+    if (combatants.length === 0) return;
+    const next = (currentTurn + 1) % combatants.length;
+    if (next === 0) setRound(r => r + 1);
+    setCurrentTurn(next);
+  };
+
+  const prevTurn = () => {
+    if (combatants.length === 0) return;
+    if (currentTurn === 0) {
+      setCurrentTurn(combatants.length - 1);
+      setRound(r => Math.max(1, r - 1));
+    } else {
+      setCurrentTurn(currentTurn - 1);
+    }
+  };
+
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    const currentId = combatants[currentTurn]?.id;
+    const reordered = Array.from(combatants);
+    const [removed] = reordered.splice(result.source.index, 1);
+    reordered.splice(result.destination.index, 0, removed);
+    setCombatants(reordered);
+    // Keep currentTurn pointing at same combatant
+    const newIdx = reordered.findIndex(c => c.id === currentId);
+    if (newIdx >= 0) setCurrentTurn(newIdx);
+  };
+
+  const totalXp = combatants.filter(c => !c.isPlayer).reduce((sum, c) => sum + getXp(c.data), 0);
   const alive = combatants.filter(c => c.currentHp > 0).length;
+  const activeCombatant = combatants[currentTurn];
 
   return (
     <>
@@ -438,6 +800,35 @@ function CombatScreen({
               <i className="ra ra-skull" />
               <span className="value">{alive}</span> / {combatants.length} alive
             </div>
+            {/* Round counter */}
+            <div className="combat-stat">
+              <i className="ra ra-stopwatch" />
+              Rodada <span className="value">{round}</span>
+            </div>
+          </div>
+
+          {/* Turn controls */}
+          <div className="turn-controls">
+            <button className="btn-turn btn-prev" onClick={prevTurn} title="Turno Anterior">
+              <i className="ra ra-arrow-cluster" />
+            </button>
+            <div className="turn-indicator">
+              {activeCombatant ? (
+                <>
+                  <span className="turn-label">Turno:</span>
+                  <span className={`turn-name${activeCombatant.isPlayer ? ' turn-name-player' : ''}`}>
+                    <i className={`ra ${activeCombatant.isPlayer ? 'ra-player' : 'ra-dragon'}`} />
+                    {activeCombatant.name}
+                  </span>
+                  <span className="turn-initiative">Init {activeCombatant.initiative}</span>
+                </>
+              ) : (
+                <span className="turn-label">Sem combatentes</span>
+              )}
+            </div>
+            <button className="btn-turn btn-next" onClick={nextTurn} title="Próximo Turno">
+              <i className="ra ra-arrow-cluster" style={{ transform: 'rotate(180deg)' }} />
+            </button>
           </div>
         </div>
         <div className="header-actions">
@@ -450,15 +841,42 @@ function CombatScreen({
         </div>
       </div>
 
-      {/* Cards */}
-      {combatants.map(c => (
-        <CombatantCard
-          key={c.id}
-          combatant={c}
-          onUpdateHp={d => updateHp(c.id, d)}
-          onRemove={() => removeCombatant(c.id)}
-        />
-      ))}
+      {/* Drag-and-drop combatant list */}
+      <DragDropContext onDragEnd={onDragEnd}>
+        <Droppable droppableId="combatants-list">
+          {(provided) => (
+            <div
+              ref={provided.innerRef}
+              {...provided.droppableProps}
+            >
+              {combatants.map((c, index) => (
+                <Draggable key={c.id} draggableId={c.id} index={index}>
+                  {(dragProvided, dragSnapshot) => (
+                    <div
+                      ref={dragProvided.innerRef}
+                      {...dragProvided.draggableProps}
+                      style={{
+                        ...dragProvided.draggableProps.style,
+                        opacity: dragSnapshot.isDragging ? 0.85 : 1,
+                      }}
+                    >
+                      <CombatantCard
+                        combatant={c}
+                        isCurrentTurn={index === currentTurn}
+                        dragHandleProps={dragProvided.dragHandleProps}
+                        onUpdateHp={d => updateHp(c.id, d)}
+                        onRemove={() => removeCombatant(c.id)}
+                        onUpdate={fields => updateCombatant(c.id, fields)}
+                      />
+                    </div>
+                  )}
+                </Draggable>
+              ))}
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
 
       {combatants.length === 0 && (
         <div className="empty-state">
@@ -481,14 +899,24 @@ function CombatScreen({
    COMBATANT CARD
    ============================================================ */
 function CombatantCard({
-  combatant, onUpdateHp, onRemove,
+  combatant, isCurrentTurn, dragHandleProps, onUpdateHp, onRemove, onUpdate,
 }: {
   combatant: Combatant;
+  isCurrentTurn: boolean;
+  dragHandleProps: any;
   onUpdateHp: (delta: number) => void;
   onRemove: () => void;
+  onUpdate: (fields: Partial<Combatant>) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [damageInput, setDamageInput] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(combatant.name);
+  const [editCurrentHp, setEditCurrentHp] = useState(String(combatant.currentHp));
+  const [editMaxHp, setEditMaxHp] = useState(String(combatant.maxHp));
+  const [editAc, setEditAc] = useState(String(combatant.ac));
+  const [editInitiative, setEditInitiative] = useState(String(combatant.initiative));
+
   const d = combatant.data;
   const isDead = combatant.currentHp <= 0;
   const hpPct = combatant.maxHp > 0 ? (combatant.currentHp / combatant.maxHp) * 100 : 0;
@@ -501,88 +929,196 @@ function CombatantCard({
     }
   };
 
+  const startEditing = () => {
+    setEditName(combatant.name);
+    setEditCurrentHp(String(combatant.currentHp));
+    setEditMaxHp(String(combatant.maxHp));
+    setEditAc(String(combatant.ac));
+    setEditInitiative(String(combatant.initiative));
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    const newCurrentHp = parseInt(editCurrentHp, 10);
+    const newMaxHp = parseInt(editMaxHp, 10);
+    const newAc = parseInt(editAc, 10);
+    const newInitiative = parseInt(editInitiative, 10);
+    onUpdate({
+      name: editName.trim() || combatant.name,
+      currentHp: isNaN(newCurrentHp) ? combatant.currentHp : Math.min(Math.max(0, newCurrentHp), isNaN(newMaxHp) ? combatant.maxHp : newMaxHp),
+      maxHp: isNaN(newMaxHp) ? combatant.maxHp : Math.max(1, newMaxHp),
+      ac: isNaN(newAc) ? combatant.ac : Math.max(1, newAc),
+      initiative: isNaN(newInitiative) ? combatant.initiative : newInitiative,
+    });
+    setEditing(false);
+  };
+
+  const cancelEdit = () => setEditing(false);
+
+  const cardClasses = [
+    'combatant-card',
+    isDead ? 'dead' : '',
+    isCurrentTurn ? 'current-turn' : '',
+    combatant.isPlayer ? 'player-card' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={`combatant-card${isDead ? ' dead' : ''}`}>
+    <div className={cardClasses}>
       <div className="card-main">
+        {/* Drag Handle */}
+        <div className="drag-handle" {...dragHandleProps} title="Arrastar para reordenar">
+          <i className="ra ra-vertical-bars" />
+        </div>
+
         <div className="card-content">
           {/* Top row: name + actions */}
           <div className="card-top-row">
             <div className="monster-identity">
-              <div className="monster-name">
-                <i className={`ra ${isDead ? 'ra-skull' : 'ra-dragon'}`} />
-                {combatant.name}
-              </div>
-              <div className="monster-meta">
-                {getSizeLabel(d.size)} {getMonsterType(d)}{d.alignment ? '' : ''}
-              </div>
+              {editing ? (
+                <input
+                  type="text"
+                  className="pc-input"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, width: '100%' }}
+                />
+              ) : (
+                <div className="monster-name">
+                  {isCurrentTurn && <span className="active-turn-dot" title="Turno atual" />}
+                  <i className={`ra ${isDead ? 'ra-skull' : combatant.isPlayer ? 'ra-player' : 'ra-dragon'}`}
+                    style={{ color: combatant.isPlayer ? 'var(--blue)' : isDead ? 'var(--text-muted)' : 'var(--red)' }}
+                  />
+                  {combatant.name}
+                </div>
+              )}
+              {!editing && (
+                <div className="monster-meta">
+                  {combatant.isPlayer
+                    ? <span style={{ color: 'var(--blue)', fontStyle: 'italic' }}>Personagem do Jogador</span>
+                    : (d ? `${getSizeLabel(d.size)} ${getMonsterType(d)}` : '')
+                  }
+                  {' '}
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                    Init: {combatant.initiative}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="card-actions">
-              <button
-                className="btn-icon"
-                onClick={() => setExpanded(!expanded)}
-                title={expanded ? 'Collapse' : 'Expand details'}
-              >
-                <i className={`ra ${expanded ? 'ra-cancel' : 'ra-scroll-unfurled'}`} />
-              </button>
-              <button
-                className="btn-icon danger"
-                onClick={onRemove}
-                title="Remove"
-              >
-                <i className="ra ra-burning-embers" />
-              </button>
+              {editing ? (
+                <>
+                  <button className="btn-icon" onClick={saveEdit} title="Salvar">
+                    <i className="ra ra-check" />
+                  </button>
+                  <button className="btn-icon" onClick={cancelEdit} title="Cancelar">
+                    <i className="ra ra-cancel" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn-icon" onClick={startEditing} title="Editar stats">
+                    <i className="ra ra-quill-ink" />
+                  </button>
+                  {!combatant.isPlayer && d && (
+                    <button
+                      className="btn-icon"
+                      onClick={() => setExpanded(!expanded)}
+                      title={expanded ? 'Collapse' : 'Expand details'}
+                    >
+                      <i className={`ra ${expanded ? 'ra-cancel' : 'ra-scroll-unfurled'}`} />
+                    </button>
+                  )}
+                  <button className="btn-icon danger" onClick={onRemove} title="Remove">
+                    <i className="ra ra-burning-embers" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
+
+          {/* Edit fields for HP, AC, Initiative */}
+          {editing && (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', margin: '8px 0', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>HP Atual</label>
+                <input type="number" className="pc-input" value={editCurrentHp} min="0"
+                  onChange={e => setEditCurrentHp(e.target.value)} style={{ width: '75px' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>HP Máx</label>
+                <input type="number" className="pc-input" value={editMaxHp} min="1"
+                  onChange={e => setEditMaxHp(e.target.value)} style={{ width: '75px' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>CA</label>
+                <input type="number" className="pc-input" value={editAc} min="1"
+                  onChange={e => setEditAc(e.target.value)} style={{ width: '65px' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <label style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Init</label>
+                <input type="number" className="pc-input" value={editInitiative}
+                  onChange={e => setEditInitiative(e.target.value)} style={{ width: '65px' }} />
+              </div>
+            </div>
+          )}
 
           {/* Stat badges */}
-          <div className="stats-row">
-            <div className={`stat-badge hp ${hpPct > 50 ? 'healthy' : 'critical'}`}>
-              <i className="ra ra-hearts" />
-              <span className="value">{combatant.currentHp}</span>
-              <span style={{ opacity: 0.5 }}>/ {combatant.maxHp}</span>
+          {!editing && (
+            <div className="stats-row">
+              <div className={`stat-badge hp ${hpPct > 50 ? 'healthy' : 'critical'}`}>
+                <i className="ra ra-hearts" />
+                <span className="value">{combatant.currentHp}</span>
+                <span style={{ opacity: 0.5 }}>/ {combatant.maxHp}</span>
+              </div>
+              <div className="stat-badge ac">
+                <i className="ra ra-shield" />
+                <span className="value">{combatant.ac}</span>
+              </div>
+              {!combatant.isPlayer && d && (
+                <>
+                  <div className="stat-badge speed">
+                    <i className="ra ra-boot-stomp" />
+                    <span className="value">{getSpeed(d)}</span>
+                  </div>
+                  <div className="stat-badge cr">
+                    <i className="ra ra-targeted" />
+                    CR <span className="value">{getCr(d)}</span>
+                  </div>
+                  <div className="stat-badge xp">
+                    <i className="ra ra-gem" />
+                    <span className="value">{getXp(d).toLocaleString()}</span> XP
+                  </div>
+                </>
+              )}
             </div>
-            <div className="stat-badge ac">
-              <i className="ra ra-shield" />
-              <span className="value">{combatant.ac}</span>
-            </div>
-            <div className="stat-badge speed">
-              <i className="ra ra-boot-stomp" />
-              <span className="value">{getSpeed(d)}</span>
-            </div>
-            <div className="stat-badge cr">
-              <i className="ra ra-targeted" />
-              CR <span className="value">{getCr(d)}</span>
-            </div>
-            <div className="stat-badge xp">
-              <i className="ra ra-gem" />
-              <span className="value">{getXp(d).toLocaleString()}</span> XP
-            </div>
-          </div>
+          )}
 
           {/* Damage controls */}
-          <div className="damage-controls">
-            <input
-              className="damage-input"
-              type="number"
-              min="0"
-              value={damageInput}
-              onChange={e => setDamageInput(e.target.value)}
-              placeholder="HP"
-              onKeyDown={e => { if (e.key === 'Enter') applyDelta(-1); }}
-            />
-            <button className="btn-damage hit" onClick={() => applyDelta(-1)}>
-              <i className="ra ra-sword" /> Damage
-            </button>
-            <button className="btn-damage heal" onClick={() => applyDelta(1)}>
-              <i className="ra ra-health" /> Heal
-            </button>
-          </div>
+          {!editing && (
+            <div className="damage-controls">
+              <input
+                className="damage-input"
+                type="number"
+                min="0"
+                value={damageInput}
+                onChange={e => setDamageInput(e.target.value)}
+                placeholder="HP"
+                onKeyDown={e => { if (e.key === 'Enter') applyDelta(-1); }}
+              />
+              <button className="btn-damage hit" onClick={() => applyDelta(-1)}>
+                <i className="ra ra-sword" /> Damage
+              </button>
+              <button className="btn-damage heal" onClick={() => applyDelta(1)}>
+                <i className="ra ra-health" /> Heal
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ---- Expanded Details ---- */}
-      {expanded && <CardDetails data={d} />}
+      {/* ---- Expanded Details (monsters only) ---- */}
+      {expanded && !combatant.isPlayer && d && <CardDetails data={d} />}
     </div>
   );
 }
@@ -932,11 +1468,12 @@ function ReinforcementsModal({
   onAdd,
   onClose,
 }: {
-  onAdd: (name: string, count: number) => void;
+  onAdd: (name: string, count: number, initiative: number) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [count, setCount] = useState(1);
+  const [initiative, setInitiative] = useState(0);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [error, setError] = useState('');
@@ -969,7 +1506,7 @@ function ReinforcementsModal({
       setError(`Criatura não encontrada: "${query}"`);
       return;
     }
-    onAdd(monster.name, Math.max(1, count));
+    onAdd(monster.name, Math.max(1, count), initiative);
     onClose();
   };
 
@@ -987,26 +1524,47 @@ function ReinforcementsModal({
         </div>
 
         <div className="spell-modal-body" style={{ padding: '20px' }}>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-              Quantidade
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="99"
-              value={count}
-              onChange={e => setCount(parseInt(e.target.value, 10) || 1)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                background: 'var(--bg-input)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-primary)',
-                fontSize: '15px',
-              }}
-            />
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Quantidade
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="99"
+                value={count}
+                onChange={e => setCount(parseInt(e.target.value, 10) || 1)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                  fontSize: '15px',
+                }}
+              />
+            </div>
+            <div style={{ width: '90px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Iniciativa
+              </label>
+              <input
+                type="number"
+                value={initiative}
+                onChange={e => setInitiative(parseInt(e.target.value, 10) || 0)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                  fontSize: '15px',
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ marginBottom: '16px' }} className="autocomplete-container">
@@ -1071,5 +1629,3 @@ function ReinforcementsModal({
     </div>
   );
 }
-
-
