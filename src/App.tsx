@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { loadMonsters, findMonster, fetchSpells, findSpell, searchMonsters } from './api';
+import { loadMonsters, findMonster, findMonsterAsync, fetchSpells, findSpell, searchMonsters } from './api';
 import {
   getHp, getAc, renderEntries, getXp, getCr, getSpeed,
   getMonsterType, getSizeLabel, getModifier, extractSpellDc,
@@ -73,6 +73,7 @@ export default function App() {
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [screen, setScreen] = useState<'setup' | 'combat'>('setup');
   const [error, setError] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [interactionCount, setInteractionCount] = useState(0);
   const [showNarrative, setShowNarrative] = useState(false);
   const [enableNarrative, setEnableNarrative] = useState(() => {
@@ -159,18 +160,31 @@ export default function App() {
     setError('');
   };
 
-  const handleAddSubmit = () => {
+  const handleAddSubmit = async () => {
     const { count, query } = parseQuantityAndName(setupInput);
     if (!query) {
       setError('Digite o nome da criatura (ex: 2 cultist ou goblin)');
       return;
     }
-    const monster = findMonster(query);
-    if (!monster) {
-      setError(`Criatura não encontrada: "${query}"`);
+    // Fast path: already in cache
+    const cached = findMonster(query);
+    if (cached) {
+      addMonsterToRoster(cached, count);
       return;
     }
-    addMonsterToRoster(monster, count);
+    // Slow path: search across all 5e.tools sources
+    setIsSearching(true);
+    setError('');
+    try {
+      const monster = await findMonsterAsync(query);
+      if (!monster) {
+        setError(`Criatura não encontrada: "${query}"`);
+        return;
+      }
+      addMonsterToRoster(monster, count);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const updateRosterCount = (id: string, delta: number) => {
@@ -527,12 +541,20 @@ export default function App() {
                 )}
               </div>
 
-              <button className="btn-add-roster" onClick={handleAddSubmit}>
-                <i className="ra ra-health" /> Inserir
+              <button className="btn-add-roster" onClick={handleAddSubmit} disabled={isSearching}>
+                {isSearching
+                  ? <><i className="ra ra-hourglass" /> Buscando…</>
+                  : <><i className="ra ra-health" /> Inserir</>
+                }
               </button>
             </div>
 
-            {error && (
+            {isSearching && (
+              <div className="setup-error" style={{ background: 'rgba(109, 159, 255, 0.08)', border: '1px solid rgba(109, 159, 255, 0.25)', color: 'var(--blue)' }}>
+                <i className="ra ra-crystal-ball" /> Buscando em todas as fontes do 5e.tools…
+              </div>
+            )}
+            {!isSearching && error && (
               <div className="setup-error">
                 <i className="ra ra-aware" /> {error}
               </div>
@@ -1477,6 +1499,7 @@ function ReinforcementsModal({
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [error, setError] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   const handleQueryChange = (val: string) => {
     setQuery(val);
@@ -1496,18 +1519,32 @@ function ReinforcementsModal({
     setShowDropdown(false);
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!query.trim()) {
       setError('Por favor, informe o nome da criatura.');
       return;
     }
-    const monster = findMonster(query.trim());
-    if (!monster) {
-      setError(`Criatura não encontrada: "${query}"`);
+    // Fast path
+    const cached = findMonster(query.trim());
+    if (cached) {
+      onAdd(cached.name, Math.max(1, count), initiative);
+      onClose();
       return;
     }
-    onAdd(monster.name, Math.max(1, count), initiative);
-    onClose();
+    // Slow path: search all 5e.tools sources
+    setIsSearching(true);
+    setError('');
+    try {
+      const monster = await findMonsterAsync(query.trim());
+      if (!monster) {
+        setError(`Criatura não encontrada: "${query}"`);
+        return;
+      }
+      onAdd(monster.name, Math.max(1, count), initiative);
+      onClose();
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
@@ -1607,7 +1644,12 @@ function ReinforcementsModal({
             )}
           </div>
 
-          {error && (
+          {isSearching && (
+            <div className="setup-error" style={{ marginBottom: '16px', background: 'rgba(109, 159, 255, 0.08)', border: '1px solid rgba(109, 159, 255, 0.25)', color: 'var(--blue)' }}>
+              <i className="ra ra-crystal-ball" /> Buscando em todas as fontes do 5e.tools…
+            </div>
+          )}
+          {!isSearching && error && (
             <div className="setup-error" style={{ marginBottom: '16px' }}>
               <i className="ra ra-aware" /> {error}
             </div>
@@ -1616,13 +1658,17 @@ function ReinforcementsModal({
           <button
             className="btn-start"
             onClick={handleAdd}
+            disabled={isSearching}
             style={{
               marginTop: '10px',
               background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
               boxShadow: '0 4px 20px rgba(168, 85, 247, 0.3)',
             }}
           >
-            <i className="ra ra-crossed-swords" /> Inserir no Combate
+            {isSearching
+              ? <><i className="ra ra-hourglass" /> Buscando…</>
+              : <><i className="ra ra-crossed-swords" /> Inserir no Combate</>
+            }
           </button>
         </div>
       </div>
